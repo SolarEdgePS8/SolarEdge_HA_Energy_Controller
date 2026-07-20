@@ -1,0 +1,40 @@
+name: Fehler melden
+description: Fehler bei Installation, Mapping oder Betrieb melden
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Bitte keine Secrets, Tokens, vollständigen Logs oder `.storage`-Dateien veröffentlichen.
+  - type: input
+    id: version
+    attributes:
+      label: Controller-Version
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home-Assistant-Version
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Betriebsart
+      options:
+        - Eigenverbrauch maximieren
+        - Netzdienlich laden
+        - Akku schonen
+        - EVOpt optimiert
+        - Installation oder Update
+  - type: textarea
+    id: problem
+    attributes:
+      label: Fehlerbeschreibung
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Config-, Sanity- und Runtime-Check
