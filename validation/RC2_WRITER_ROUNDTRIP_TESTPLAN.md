@@ -16,9 +16,9 @@ Ein realer, kontrollierter Charge-Writer-Rundlauf auf der Referenzinstallation:
 
 Bei jeder Abweichung:
 
+- Controller-Master zuerst ausschalten;
 - ursprüngliches Charge-Limit direkt wiederherstellen;
 - ursprünglichen Modus wiederherstellen;
-- Controller-Master ausschalten;
 - Fehlerbericht unter `/share` schreiben.
 
 ## Vorprüfung
@@ -38,7 +38,7 @@ Der Test startet nur, wenn:
 SHA256:
 
 ```text
-c46a4abe520d552d6eda889a99b5310245c6a67462be0738128d35da44a8a5a1
+b77db9d48827ac2d67467b13a313199b7d90823d5fc641ce59ed5afbe8e39b2e
 ```
 
 ## Freigabekriterium
