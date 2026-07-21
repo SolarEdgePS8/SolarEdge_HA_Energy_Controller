@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 VALID_ACTIONS = {"holdcharge", "normal", "charge", "hold"}
 ACTION_THRESHOLD_W = 100.0
 HARD_SLOT_MAX_AGE_MIN = 120.0
@@ -168,33 +168,23 @@ def current_slot_index(timestamps: list[str], durations: list[float], now: datet
 
 
 def derive_action_from_slot(
-    suggestion: dict[str, Any],
     charge_w: float,
     discharge_w: float,
     import_w: float,
     export_w: float,
     threshold_w: float = ACTION_THRESHOLD_W,
 ) -> tuple[str, str]:
-    """Return the EVOpt action and the source used to derive it.
+    """Derive the action that reproduces the current optimizer slot.
 
-    evcc 0.312 may omit battery.devices[].suggestion.action even though the
-    optimizer plan is complete. In that case the current optimizer slot is the
-    authoritative fallback:
-
-    - planned grid charging -> charge
-    - planned PV charging -> normal
-    - planned battery discharge -> holdcharge
-    - planned export while battery stays idle -> holdcharge
-    - planned grid import while battery stays idle -> hold
-    - otherwise -> normal
+    The slot is authoritative once the plan has advanced beyond its first
+    partial slot. evcc's ``suggestion.action`` is generated together with the
+    optimizer result and can remain unchanged until the next solver run. Using
+    it unconditionally caused a false ``action_plan_consistent`` failure at
+    every 15-minute slot boundary.
 
     Simultaneous contradictory flows are rejected as unknown so Home Assistant
     falls back safely instead of guessing.
     """
-    explicit = str(suggestion.get("action") or "").strip().lower()
-    if explicit in VALID_ACTIONS:
-        return explicit, "suggestion"
-
     charge_active = charge_w > threshold_w
     discharge_active = discharge_w > threshold_w
     import_active = import_w > threshold_w
@@ -232,46 +222,85 @@ def action_matches_slot(
 ) -> bool:
     """Validate that the selected action can reproduce the optimizer slot."""
     if action == "holdcharge":
-        # Charging is blocked, while discharge and export are explicitly
-        # allowed. The old implementation incorrectly required discharge=0.
         return charge_w < threshold_w
     if action == "hold":
-        # Discharge is blocked; PV charging may still happen. Grid charging
-        # belongs to the dedicated `charge` action.
-        return (
-            discharge_w < threshold_w
-            and not (charge_w > threshold_w and import_w > threshold_w)
-        )
+        return discharge_w < threshold_w and not (charge_w > threshold_w and import_w > threshold_w)
     if action == "charge":
-        # `charge` is the only action that deliberately enables grid charging.
         return charge_w > threshold_w and import_w > threshold_w
     if action == "normal":
         return True
     return False
 
 
-def evaluate_freshness(
-    age_min: float | None,
-    max_age_min: float,
-    current_slot_present: bool,
-) -> tuple[bool, bool, bool, float]:
-    """Evaluate update age without discarding an active optimizer slot.
+def select_action(
+    suggestion: dict[str, Any],
+    current_index: int | None,
+    charge_w: float,
+    discharge_w: float,
+    import_w: float,
+    export_w: float,
+) -> dict[str, Any]:
+    """Select a trustworthy action for the current slot.
 
-    A current slot remains usable for a bounded grace period even when the full
-    optimizer result was not regenerated inside the normal freshness window.
-    The hard 120-minute limit prevents using an indefinitely stale plan.
+    ``suggestion.action`` is trusted only for the first slot of the optimizer
+    result. After the plan advances, the current slot is newer than the
+    suggestion and therefore authoritative. A mismatching first-slot
+    suggestion is also replaced by the validated slot action instead of
+    causing an unnecessary legacy fallback.
     """
+    explicit = str(suggestion.get("action") or "").strip().lower()
+    explicit_valid = explicit in VALID_ACTIONS
+    slot_action, slot_reason = derive_action_from_slot(charge_w, discharge_w, import_w, export_w)
+    slot_valid = slot_action in VALID_ACTIONS
+    explicit_consistent = explicit_valid and action_matches_slot(explicit, charge_w, discharge_w, import_w, export_w)
+
+    if current_index is None:
+        return {
+            "action": explicit if explicit_valid else "unknown",
+            "source": "suggestion_without_current_slot" if explicit_valid else "none",
+            "suggestion_action": explicit or "unavailable",
+            "suggestion_plan_consistent": False,
+            "slot_action": slot_action,
+            "slot_action_reason": slot_reason,
+            "suggestion_overridden": False,
+        }
+
+    if current_index == 0 and explicit_valid and explicit_consistent:
+        action = explicit
+        source = "suggestion"
+        overridden = False
+    elif slot_valid:
+        action = slot_action
+        if explicit_valid and explicit != slot_action:
+            source = "slot_override_suggestion_mismatch"
+            overridden = True
+        elif explicit_valid:
+            source = "slot_current"
+            overridden = False
+        else:
+            source = slot_reason
+            overridden = False
+    else:
+        action = "unknown"
+        source = slot_reason
+        overridden = False
+
+    return {
+        "action": action,
+        "source": source,
+        "suggestion_action": explicit or "unavailable",
+        "suggestion_plan_consistent": explicit_consistent,
+        "slot_action": slot_action,
+        "slot_action_reason": slot_reason,
+        "suggestion_overridden": overridden,
+    }
+
+
+def evaluate_freshness(age_min: float | None, max_age_min: float, current_slot_present: bool) -> tuple[bool, bool, bool, float]:
     normal_limit = max(max_age_min, 1.0)
     hard_limit = max(normal_limit, HARD_SLOT_MAX_AGE_MIN)
-    fresh_by_update = (
-        age_min is not None and -1.0 <= age_min <= normal_limit
-    )
-    slot_freshness_override = bool(
-        age_min is not None
-        and current_slot_present
-        and -1.0 <= age_min <= hard_limit
-        and not fresh_by_update
-    )
+    fresh_by_update = age_min is not None and -1.0 <= age_min <= normal_limit
+    slot_freshness_override = bool(age_min is not None and current_slot_present and -1.0 <= age_min <= hard_limit and not fresh_by_update)
     fresh = fresh_by_update or slot_freshness_override
     return fresh, fresh_by_update, slot_freshness_override, hard_limit
 
@@ -294,6 +323,13 @@ def error_payload(message: str, evcc_url: str, response_ms: float | None = None)
         "health_reason": message[:240],
         "solver_status": "unavailable",
         "action_raw": "unavailable",
+        "action_source": "error",
+        "action_inference_reason": "error",
+        "suggestion_action": "unavailable",
+        "suggestion_plan_consistent": False,
+        "suggestion_overridden": False,
+        "slot_action": "unavailable",
+        "slot_action_reason": "unavailable",
         "plan_consistent": False,
         "action_plan_consistent": False,
     }
@@ -374,9 +410,7 @@ def main() -> int:
         req_batteries = list(req.get("batteries") or [])
         res_batteries = list(res.get("batteries") or [])
         detail_batteries = list(details.get("batteryDetails") or [])
-        battery_index, battery_selection = select_battery_index(
-            detail_batteries, req_batteries, res_batteries, battery_title, battery_name
-        )
+        battery_index, battery_selection = select_battery_index(detail_batteries, req_batteries, res_batteries, battery_title, battery_name)
         if battery_index is None:
             raise RuntimeError(f"battery_{battery_selection}")
         if battery_index >= len(req_batteries) or battery_index >= len(res_batteries):
@@ -395,18 +429,10 @@ def main() -> int:
         soc_wh = [fnum(x, 0.0) or 0.0 for x in (sb.get("state_of_charge") or [])]
 
         arrays = {
-            "timestamp": timestamps,
-            "dt": durations,
-            "ft": pv,
-            "gt": load,
-            "p_E": feedin_prices,
-            "p_N": grid_prices,
-            "charging": charge,
-            "discharging": discharge,
-            "soc": soc_wh,
-            "grid_export": grid_export,
-            "grid_import": grid_import,
-            "flow_direction": flow_direction,
+            "timestamp": timestamps, "dt": durations, "ft": pv, "gt": load,
+            "p_E": feedin_prices, "p_N": grid_prices, "charging": charge,
+            "discharging": discharge, "soc": soc_wh, "grid_export": grid_export,
+            "grid_import": grid_import, "flow_direction": flow_direction,
         }
         lengths = {key: len(value) for key, value in arrays.items()}
         slot_count = len(durations)
@@ -455,25 +481,14 @@ def main() -> int:
         current_slot_present = current_index is not None
 
         current: dict[str, Any] = {
-            "slot_index": current_index,
-            "slot_start": None,
-            "slot_end": None,
-            "slot_duration_s": None,
-            "slot_pv_wh": None,
-            "slot_load_wh": None,
-            "slot_charge_wh": None,
-            "slot_discharge_wh": None,
-            "slot_grid_import_wh": None,
-            "slot_grid_export_wh": None,
-            "slot_pv_w": None,
-            "slot_load_w": None,
-            "slot_charge_w": None,
-            "slot_discharge_w": None,
-            "slot_grid_import_w": None,
-            "slot_grid_export_w": None,
-            "slot_soc_pct": None,
-            "slot_grid_price_eur_kwh": None,
-            "slot_feedin_price_eur_kwh": None,
+            "slot_index": current_index, "slot_start": None, "slot_end": None,
+            "slot_duration_s": None, "slot_pv_wh": None, "slot_load_wh": None,
+            "slot_charge_wh": None, "slot_discharge_wh": None,
+            "slot_grid_import_wh": None, "slot_grid_export_wh": None,
+            "slot_pv_w": None, "slot_load_w": None, "slot_charge_w": None,
+            "slot_discharge_w": None, "slot_grid_import_w": None,
+            "slot_grid_export_w": None, "slot_soc_pct": None,
+            "slot_grid_price_eur_kwh": None, "slot_feedin_price_eur_kwh": None,
         }
         if current_index is not None and arrays_equal:
             index = current_index
@@ -501,28 +516,15 @@ def main() -> int:
             })
 
         plan_consistent = bool(
-            arrays_equal
-            and 180 <= slot_count <= 193
-            and 0 < cadence_s <= 901
-            and max_balance_error <= 2.0
-            and max_soc_error <= 2.0
-            and max_time_error <= 1.0
-            and max_power_limit_error <= 2.0
+            arrays_equal and 180 <= slot_count <= 193 and 0 < cadence_s <= 901
+            and max_balance_error <= 2.0 and max_soc_error <= 2.0
+            and max_time_error <= 1.0 and max_power_limit_error <= 2.0
             and 0 <= s_min <= s_initial <= s_max <= capacity_wh
             and current_slot_present
         )
 
-        device, device_selection = select_device(
-            devices if isinstance(devices, list) else [],
-            selected_title,
-            selected_name,
-            capacity_wh / 1000.0 if capacity_wh else None,
-        )
-        suggestion = (
-            device.get("suggestion")
-            if isinstance(device, dict) and isinstance(device.get("suggestion"), dict)
-            else {}
-        )
+        device, device_selection = select_device(devices if isinstance(devices, list) else [], selected_title, selected_name, capacity_wh / 1000.0 if capacity_wh else None)
+        suggestion = device.get("suggestion") if isinstance(device, dict) and isinstance(device.get("suggestion"), dict) else {}
         actionable = bval(suggestion.get("actionable"))
         controllable = bval(device.get("controllable")) if isinstance(device, dict) else False
         battery_soc = fnum(device.get("soc"), None) if isinstance(device, dict) else None
@@ -533,42 +535,14 @@ def main() -> int:
         export_w = fnum(current.get("slot_grid_export_w"), 0.0) or 0.0
         import_w = fnum(current.get("slot_grid_import_w"), 0.0) or 0.0
 
-        if current_slot_present:
-            action, action_source = derive_action_from_slot(
-                suggestion,
-                charge_w,
-                discharge_w,
-                import_w,
-                export_w,
-            )
-            action_plan_consistent = action_matches_slot(
-                action,
-                charge_w,
-                discharge_w,
-                import_w,
-                export_w,
-            )
-        else:
-            explicit = str(suggestion.get("action") or "").strip().lower()
-            action = explicit if explicit in VALID_ACTIONS else "unknown"
-            action_source = (
-                "suggestion_without_current_slot"
-                if explicit in VALID_ACTIONS
-                else "none"
-            )
-            action_plan_consistent = False
+        selection = select_action(suggestion, current_index, charge_w, discharge_w, import_w, export_w)
+        action = str(selection["action"])
+        action_source = str(selection["source"])
+        action_plan_consistent = current_slot_present and action_matches_slot(action, charge_w, discharge_w, import_w, export_w)
 
         updated = parse_time(evopt.get("updated"))
-        age_min = (
-            (now - updated.astimezone(timezone.utc)).total_seconds() / 60.0
-            if updated
-            else None
-        )
-        fresh, fresh_by_update, slot_freshness_override, hard_stale_limit_min = evaluate_freshness(
-            age_min,
-            args.max_age_min,
-            current_slot_present,
-        )
+        age_min = (now - updated.astimezone(timezone.utc)).total_seconds() / 60.0 if updated else None
+        fresh, fresh_by_update, slot_freshness_override, hard_stale_limit_min = evaluate_freshness(age_min, args.max_age_min, current_slot_present)
         solver_status = str(res.get("status") or "unknown")
         schema = schema_fingerprint(req, res, details, rb, sb)
 
@@ -599,51 +573,47 @@ def main() -> int:
             health_reason = "failed_checks:" + ",".join(failed)
         elif not action_plan_consistent:
             health_reason = "failed_checks:action_plan_consistent"
+        elif selection["suggestion_overridden"]:
+            health_reason = "ok:slot_override_suggestion_mismatch"
         elif slot_freshness_override:
             health_reason = "ok:current_slot_valid_stale_update"
         else:
             health_reason = "ok"
 
         payload: dict[str, Any] = {
-            "adapter_status": "ok",
-            "tool_version": TOOL_VERSION,
-            "created_at": now.isoformat(),
-            "evcc_url": evcc_url,
+            "adapter_status": "ok", "tool_version": TOOL_VERSION,
+            "created_at": now.isoformat(), "evcc_url": evcc_url,
             "evcc_reachable": True,
             "response_ms": round(response_ms, 1) if response_ms is not None else None,
-            "evcc_version": evcc_version,
-            "data_healthy": data_healthy,
-            "active_ready_raw": active_ready_raw,
-            "health_reason": health_reason,
+            "evcc_version": evcc_version, "data_healthy": data_healthy,
+            "active_ready_raw": active_ready_raw, "health_reason": health_reason,
             "solver_status": solver_status,
             "updated": updated.isoformat() if updated else "",
             "age_min": round(age_min, 3) if age_min is not None else None,
-            "fresh": fresh,
-            "fresh_by_update": fresh_by_update,
+            "fresh": fresh, "fresh_by_update": fresh_by_update,
             "current_slot_valid": current_slot_present,
             "slot_freshness_override": slot_freshness_override,
             "hard_stale_limit_min": hard_stale_limit_min,
-            "schema_fingerprint": schema,
-            "battery_index": battery_index,
-            "battery_selection": battery_selection,
-            "device_selection": device_selection,
-            "battery_title": selected_title,
-            "battery_name": selected_name,
-            "battery_controllable": controllable,
-            "battery_actionable": actionable,
+            "schema_fingerprint": schema, "battery_index": battery_index,
+            "battery_selection": battery_selection, "device_selection": device_selection,
+            "battery_title": selected_title, "battery_name": selected_name,
+            "battery_controllable": controllable, "battery_actionable": actionable,
             "battery_soc_pct": round(battery_soc, 3) if battery_soc is not None else None,
             "battery_capacity_kwh": round(battery_capacity_kwh, 3) if battery_capacity_kwh is not None else None,
             "battery_plan_initial_soc_pct": round(100.0 * s_initial / capacity_wh, 3) if capacity_wh > 0 else None,
             "battery_plan_min_soc_pct": round(100.0 * s_min / capacity_wh, 3) if capacity_wh > 0 else None,
             "battery_plan_max_soc_pct": round(100.0 * s_max / capacity_wh, 3) if capacity_wh > 0 else None,
-            "action_raw": action,
-            "action_source": action_source,
+            "action_raw": action, "action_source": action_source,
             "action_inference_reason": action_source,
+            "suggestion_action": selection["suggestion_action"],
+            "suggestion_plan_consistent": selection["suggestion_plan_consistent"],
+            "suggestion_overridden": selection["suggestion_overridden"],
+            "slot_action": selection["slot_action"],
+            "slot_action_reason": selection["slot_action_reason"],
             "suggested_charge": fnum(suggestion.get("charge"), None),
             "suggested_discharge": fnum(suggestion.get("discharge"), None),
             "action_plan_consistent": action_plan_consistent,
-            "plan_consistent": plan_consistent,
-            "slot_count": slot_count,
+            "plan_consistent": plan_consistent, "slot_count": slot_count,
             "horizon_hours": round(sum(durations) / 3600.0, 3) if durations else None,
             "cadence_s": round(cadence_s, 3) if durations else None,
             "max_balance_error_wh": round(max_balance_error, 6) if math.isfinite(max_balance_error) else None,
@@ -662,10 +632,8 @@ def main() -> int:
             "forecast_highest_time": forecast_highest.get("time") if forecast_highest else None,
             "forecast_lowest_soc_pct": round(fnum(forecast_lowest.get("soc"), 0.0) or 0.0, 3) if forecast_lowest else None,
             "forecast_lowest_time": forecast_lowest.get("time") if forecast_lowest else None,
-            "live_pv_w": live_pv_w,
-            "live_home_w": live_home_w,
-            "live_grid_w": live_grid_w,
-            "live_battery_w": live_battery_w,
+            "live_pv_w": live_pv_w, "live_home_w": live_home_w,
+            "live_grid_w": live_grid_w, "live_battery_w": live_battery_w,
             "tariff_grid_eur_kwh": tariff_grid,
             "tariff_feedin_eur_kwh": tariff_feedin,
         }
@@ -680,6 +648,6 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except BrokenPipeError:
         raise SystemExit(0)
-    except Exception as exc:  # defensive: command_line sensor must always receive JSON
+    except Exception as exc:
         emit(error_payload(f"fatal_error: {exc}", "unknown"))
         raise SystemExit(0)
