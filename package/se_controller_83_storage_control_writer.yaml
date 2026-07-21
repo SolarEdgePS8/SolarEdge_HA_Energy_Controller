@@ -1,0 +1,73 @@
+# SolarEdge Energy Controller · portabler Storage-Control-Mode Writer
+# Optional: Nur aktiv, wenn Entity und Remote-Optionswert gemappt wurden.
+
+input_text:
+  se_storage_control_writer_last_reason:
+    name: "SE Storage-Control Writer letzter Grund"
+    max: 80
+    initial: "startup"
+
+automation:
+  - id: se_storage_control_mode_writer
+    alias: "SolarEdge Energy Controller: Storage-Control-Mode Writer"
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/2"
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - input_boolean.se_nf_site_config_confirmed
+          - input_text.se_nf_storage_control_mode_entity
+          - input_text.se_nf_storage_control_remote_option
+          - binary_sensor.se_nf_controller_write_enabled
+    action:
+      - delay: >-
+          {% if trigger.platform == 'homeassistant' %}00:02:15{% else %}00:00:00{% endif %}
+      - variables:
+          write_enabled: "{{ is_state('binary_sensor.se_nf_controller_write_enabled', 'on') }}"
+          entity: "{{ states('input_text.se_nf_storage_control_mode_entity') | trim }}"
+          option: "{{ states('input_text.se_nf_storage_control_remote_option') | trim }}"
+          configured: >-
+            {{
+              entity not in ['', 'unknown', 'unavailable', 'none', 'None']
+              and option not in ['', 'unknown', 'unavailable', 'none', 'None']
+            }}
+          current: "{{ states(entity) if configured else 'unavailable' }}"
+          options: "{{ state_attr(entity, 'options') if configured and state_attr(entity, 'options') is sequence else [] }}"
+          age_s: >-
+            {% set st = states[entity] if configured and entity in states else none %}
+            {% set ts = as_timestamp(st.last_changed, default=0) if st is not none else 0 %}
+            {{ (as_timestamp(now()) - ts) | int(999999) }}
+          write_allowed: >-
+            {{
+              write_enabled
+              and configured
+              and current not in ['unknown', 'unavailable', 'none', 'None', '']
+              and option in options
+              and current != option
+              and age_s | int(999999) >= 30
+            }}
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ write_allowed }}"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: "{{ entity }}"
+                data:
+                  option: "{{ option }}"
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.se_storage_control_writer_last_reason
+                data:
+                  value: "remote_control"
+              - service: logbook.log
+                data:
+                  name: "SE Storage-Control"
+                  message: "Storage-Control -> {{ option }} (vorher={{ current }}, Entity={{ entity }})."
+        default: []

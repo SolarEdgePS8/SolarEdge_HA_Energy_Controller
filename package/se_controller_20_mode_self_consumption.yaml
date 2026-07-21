@@ -1,0 +1,18 @@
+# SolarEdge Energy Controller v0.0.1 · Modus Eigenverbrauch maximieren
+# Der Modus liefert nur Anforderungen, niemals SolarEdge-Writes.
+
+template:
+  - sensor:
+      - name: SE Controller Eigenverbrauch Charge Target
+        unique_id: se_controller_self_consumption_charge_target_w
+        icon: mdi:home-battery
+        state: "{{ states('input_number.se_nf_open_charge_limit_w') | float(5000) | round(0) }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+      - name: SE Controller Eigenverbrauch Next Session State
+        unique_id: se_controller_self_consumption_next_session_state
+        icon: mdi:state-machine
+        state: "{% if not is_state('input_boolean.se_netzdienlich_enabled','on') %}\n  closed\n{% elif is_state('binary_sensor.se_nf_evcc_grid_charge_request','on')
+          %}\n  evcc_override\n{% elif not is_state('sensor.se_nf_config_check','ok') or not is_state('sensor.se_nf_sanity_check','ok') %}\n \
+          \ risk\n{% else %}\n  open\n{% endif %}"

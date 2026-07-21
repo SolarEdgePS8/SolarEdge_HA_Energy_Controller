@@ -1,0 +1,59 @@
+# SolarEdge Energy Controller v0.0.1 · Kompatibilitäts-Automationen
+# IDs bleiben erhalten; direkte SolarEdge-Writes wurden vollständig entfernt.
+
+automation:
+  - id: se_nf_v294a_master_off_defaults
+    alias: "SolarEdge Energy Controller: Master AUS – Ansichten aktualisieren"
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.se_netzdienlich_enabled
+        to: "off"
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: state
+        entity_id: input_boolean.se_netzdienlich_enabled
+        state: "off"
+    action:
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.se_nf_desired_target
+            - sensor.se_nf_active_control_label
+  - id: se_nf_v294b_writer_close_bypass
+    alias: "SolarEdge Energy Controller: Charge-Writer – Close-Bypass aktualisieren"
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - sensor.se_nf_charge_limit_target
+          - sensor.se_nf_desired_target
+          - sensor.se_nf_writer_mode
+          - sensor.se_nf_charge_limit_actual
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      - condition: state
+        entity_id: input_boolean.se_netzdienlich_enabled
+        state: "on"
+      - condition: template
+        value_template: >-
+          {% set target = states('sensor.se_nf_charge_limit_target') | float(states('sensor.se_nf_desired_target') | float(5000)) %}
+          {% set actual = states('sensor.se_nf_charge_limit_actual') | float(0) %}
+          {% set mode = states('sensor.se_nf_writer_mode') %}
+          {{
+            target <= 100
+            and actual >= 1000
+            and mode in ['blocked_cooldown', 'blocked_lock', 'priority_open', 'normal', 'idle']
+          }}
+    action:
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.se_nf_desired_target
+            - sensor.se_nf_charge_limit_actual

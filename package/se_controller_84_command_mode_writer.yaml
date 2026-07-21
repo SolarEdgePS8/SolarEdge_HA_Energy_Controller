@@ -1,0 +1,130 @@
+# SolarEdge Energy Controller · portabler Storage Command-Mode Writer
+# Keine lokalen EV-/Wallbox-Entities. EVCC wird ausschließlich über das Mapping
+# input_text.se_nf_evcc_battery_mode_entity ausgewertet.
+
+input_text:
+  se_storage_command_mode_writer_last_reason:
+    name: "SE Storage Command-Mode Writer letzter Grund"
+    max: 80
+    initial: "startup"
+
+automation:
+  - id: se_storage_command_mode_orchestrator
+    alias: "SolarEdge Energy Controller: Storage Command-Mode Writer"
+    mode: queued
+    max: 2
+    max_exceeded: silent
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/2"
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - input_boolean.se_nf_site_config_confirmed
+          - input_text.se_nf_command_mode_entity
+          - input_text.se_nf_command_mode_grid_option
+          - input_text.se_nf_command_mode_default_option
+          - input_text.se_nf_storage_control_mode_entity
+          - input_text.se_nf_storage_control_remote_option
+          - binary_sensor.se_nf_controller_write_enabled
+          - binary_sensor.se_nf_external_ev_charging
+          - binary_sensor.se_nf_evcc_grid_charge_request
+          - binary_sensor.se_nf_evopt_grid_charge_request
+    action:
+      - delay: >-
+          {% if trigger.platform == 'homeassistant' %}00:02:30{% else %}00:00:00{% endif %}
+      - variables:
+          write_enabled: "{{ is_state('binary_sensor.se_nf_controller_write_enabled', 'on') }}"
+          external_ev: "{{ is_state('binary_sensor.se_nf_external_ev_charging', 'on') }}"
+          cmd_entity: "{{ states('input_text.se_nf_command_mode_entity') | trim }}"
+          cmd_configured: "{{ cmd_entity not in ['', 'unknown', 'unavailable', 'none', 'None'] }}"
+          cmd_now: "{{ states(cmd_entity) if cmd_configured else 'unavailable' }}"
+          cmd_options: "{{ state_attr(cmd_entity, 'options') if cmd_configured and state_attr(cmd_entity, 'options') is sequence else [] }}"
+          cmd_available: "{{ cmd_configured and cmd_now not in ['unknown', 'unavailable', 'none', 'None', ''] }}"
+          control_entity: "{{ states('input_text.se_nf_storage_control_mode_entity') | trim }}"
+          control_option: "{{ states('input_text.se_nf_storage_control_remote_option') | trim }}"
+          control_configured: "{{ control_entity not in ['', 'unknown', 'unavailable', 'none', 'None'] }}"
+          control_now: "{{ states(control_entity) if control_configured else '' }}"
+          remote_ready: >-
+            {% if not control_configured %}
+              true
+            {% elif control_option not in ['', 'unknown', 'unavailable', 'none', 'None'] %}
+              {{ control_now == control_option }}
+            {% else %}
+              {{ control_now | lower in ['remote control', 'remote', 'extern', 'external'] }}
+            {% endif %}
+          configured_grid: "{{ states('input_text.se_nf_command_mode_grid_option') | trim }}"
+          configured_default: "{{ states('input_text.se_nf_command_mode_default_option') | trim }}"
+          discovered_grid: >-
+            {% set matches = cmd_options | select('search', '(?i)charge from solar power and grid') | list %}
+            {{ matches[0] if matches | length > 0 else '' }}
+          discovered_default: >-
+            {% set matches = cmd_options | select('search', '(?i)maximize self consumption') | list %}
+            {{ matches[0] if matches | length > 0 else '' }}
+          grid_option: "{{ configured_grid if configured_grid not in ['', 'unknown', 'unavailable', 'none', 'None'] else discovered_grid }}"
+          default_option: "{{ configured_default if configured_default not in ['', 'unknown', 'unavailable', 'none', 'None'] else discovered_default }}"
+          grid_request: >-
+            {{
+              is_state('binary_sensor.se_nf_evcc_grid_charge_request', 'on')
+              or is_state('binary_sensor.se_nf_evopt_grid_charge_request', 'on')
+            }}
+          last_reason: "{{ states('input_text.se_storage_command_mode_writer_last_reason') }}"
+          writer_owned_grid: "{{ last_reason in ['evcc_grid_charge', 'evopt_grid_charge'] }}"
+          target_option: >-
+            {% if external_ev %}
+              __HOLD__
+            {% elif grid_request and grid_option != '' %}
+              {{ grid_option }}
+            {% elif (not grid_request) and writer_owned_grid and default_option != '' %}
+              {{ default_option }}
+            {% else %}
+              __HOLD__
+            {% endif %}
+          target_reason: >-
+            {% if target_option == grid_option and is_state('binary_sensor.se_nf_evopt_grid_charge_request', 'on') %}
+              evopt_grid_charge
+            {% elif target_option == grid_option %}
+              evcc_grid_charge
+            {% elif target_option == default_option %}
+              default_restore
+            {% else %}
+              hold
+            {% endif %}
+          age_s: >-
+            {% set st = states[cmd_entity] if cmd_configured and cmd_entity in states else none %}
+            {% set ts = as_timestamp(st.last_changed, default=0) if st is not none else 0 %}
+            {{ (as_timestamp(now()) - ts) | int(999999) }}
+          write_allowed: >-
+            {{
+              write_enabled
+              and remote_ready
+              and cmd_available
+              and target_option != '__HOLD__'
+              and target_option in cmd_options
+              and cmd_now != target_option
+              and age_s | int(999999) >= 30
+            }}
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ write_allowed }}"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: "{{ cmd_entity }}"
+                data:
+                  option: "{{ target_option }}"
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.se_storage_command_mode_writer_last_reason
+                data:
+                  value: "{{ target_reason | trim }}"
+              - service: logbook.log
+                data:
+                  name: "SE Command-Mode"
+                  message: >-
+                    Ziel={{ target_option }}, Grund={{ target_reason | trim }},
+                    vorher={{ cmd_now }}, Entity={{ cmd_entity }}.
+        default: []

@@ -1,0 +1,150 @@
+# SolarEdge Energy Controller v0.0.1 · Einziger Charge-Limit Writer
+# 0 W = Laden sperren, 5000 W = Laden freigeben. Kein anderer Modus schreibt direkt.
+
+automation:
+  - id: se_nf_v28_single_writer
+    alias: "SolarEdge Energy Controller: Charge-Limit Writer"
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: state
+        entity_id:
+          - sensor.se_nf_desired_target
+          - input_select.se_nf_session_state
+          - input_select.se_nf_optimization_mode
+          - input_boolean.se_netzdienlich_enabled
+          - sensor.se_nf_config_check
+          - sensor.se_nf_sanity_check
+          - sensor.se_nf_charge_limit_actual
+          - binary_sensor.se_nf_evopt_active_control
+          - sensor.se_nf_evopt_action_stable
+          - sensor.se_nf_active_control_label
+    action:
+      - delay: >-
+          {% if trigger.platform == 'homeassistant' %}00:02:30{% else %}00:00:00{% endif %}
+      - variables:
+          debug: "{{ is_state('input_boolean.se_netzdienlich_debug','on') }}"
+          controller_write_enabled: "{{ is_state('binary_sensor.se_nf_controller_write_enabled','on') }}"
+          entity: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          configured_entity: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          target_w: "{{ states('sensor.se_nf_desired_target') | float(5000) }}"
+          current_w: "{{ states(entity) | float(999999) }}"
+          delta_w: "{{ (target_w | float(5000) - current_w | float(999999)) | abs }}"
+          min_delta_w: "{{ states('input_number.se_nf_write_min_delta_w') | float(100) }}"
+          cooldown_s: "{{ states('input_number.se_nf_write_cooldown_s') | int(600) }}"
+          lock_s: "{{ states('input_number.se_nf_write_lock_s') | int(60) }}"
+          last_write_ts: "{{ as_timestamp(states('input_datetime.se_nf_last_write'), 0) | int(0) }}"
+          now_ts: "{{ now().timestamp() | int(0) }}"
+          cooldown_ok: "{{ (now_ts | int(0) - last_write_ts | int(0)) >= cooldown_s | int(600) }}"
+          lock_active: "{{ is_state('binary_sensor.se_nf_write_lock_active','on') }}"
+          target_open_plausible: >-
+            {% set s = states('input_select.se_nf_session_state') %}
+
+            {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+
+            {% set now_i = now().timestamp() | int(0) %}
+
+            {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+
+            {% set evopt_open = selected == 'EVOpt optimiert' and is_state('binary_sensor.se_nf_evopt_active_control','on') and states('sensor.se_nf_evopt_action_stable')
+            in ['normal','hold','charge'] %}
+
+            {% set self_open = selected == 'Eigenverbrauch maximieren' %}
+
+            {% set fail_open = not is_state('input_boolean.se_netzdienlich_enabled','on') or not is_state('sensor.se_nf_config_check','ok') or
+            not is_state('sensor.se_nf_sanity_check','ok') %}
+
+            {{ fail_open or self_open or evopt_open or s in ['evcc_override','low_soc','risk'] or (s in ['open','battery_full_open'] and start_ts
+            > 0 and now_i >= start_ts) }}
+          target_open_is_risk: >-
+            {{ is_state('input_select.se_nf_session_state','risk') }}
+          target_open_stable_s: >-
+            {{ (now().timestamp() | int(0)) -
+               (as_timestamp(states.input_select.se_nf_session_state.last_changed, 0) | int(0)) }}
+          target_open_allowed: >-
+            {{ target_open_plausible
+               and (
+                 not target_open_is_risk
+                 or target_open_stable_s | int(0) >= 90
+               ) }}
+          priority_open_write: >-
+            {{ target_w | float(0) >= 4750 and target_open_allowed }}
+          safety_close_write: >-
+            {{ target_w | float(0) <= 50 and current_w | float(0) > 50 }}
+          normal_write_window_ok: "{{ cooldown_ok and not lock_active }}"
+          write_allowed: >-
+            {{ controller_write_enabled
+               and states(entity) not in ['unknown','unavailable','none','']
+               and target_w | float(5000) >= 0
+               and target_w | float(5000) <= 5000
+               and current_w | float(999999) <= 5000
+               and delta_w | float(0) >= min_delta_w | float(100)
+               and (
+                    safety_close_write
+                    or priority_open_write
+                    or (normal_write_window_ok and (target_w | float(0) < 4750 or target_open_allowed))
+               ) }}
+      - if:
+          - condition: template
+            value_template: "{{ debug }}"
+        then:
+          - service: system_log.write
+            data:
+              level: info
+              message: >-
+                SE NF V2.8.9a Writer Check: state={{ states('input_select.se_nf_session_state') }},
+                target={{ target_w }}W, current={{ current_w }}W, delta={{ delta_w }}W,
+                configured_entity={{ configured_entity }}, fixed_entity={{ entity }},
+                priority_open={{ priority_open_write }},
+                cooldown_ok={{ cooldown_ok }}, lock_active={{ lock_active }},
+                allowed={{ write_allowed }}, reason={{ states('sensor.se_nf_decision_reason') }}
+      - condition: template
+        value_template: "{{ write_allowed }}"
+      - service: number.set_value
+        data:
+          entity_id: >-
+            {{ entity | string | replace('"','') | replace("'",'') | replace('\\','') | trim }}
+          value: "{{ target_w | float(5000) | round(0) }}"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.se_nf_last_write
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.se_nf_write_lock_until
+        data:
+          datetime: "{{ (now() + timedelta(seconds=lock_s | int(60))).strftime('%Y-%m-%d %H:%M:%S') }}"
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.se_nf_last_applied_charge_limit_w
+        data:
+          value: "{{ target_w | float(5000) | round(0) }}"
+      - if:
+          - condition: template
+            value_template: >-
+              {% set s = states('input_select.se_nf_session_state') %}
+              {% set planned_ts = as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) %}
+              {% set now_ts = now().timestamp() | int(0) %}
+              {{ target_w | float(0) >= 4750
+                 and s in ['open','battery_full_open']
+                 and planned_ts > 0
+                 and now_ts >= planned_ts }}
+        then:
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.se_nf_last_open_write
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - if:
+          - condition: template
+            value_template: "{{ debug }}"
+        then:
+          - service: system_log.write
+            data:
+              level: info
+              message: "SE NF V2.8.9a Writer wrote {{ target_w }}W to {{ entity }}"

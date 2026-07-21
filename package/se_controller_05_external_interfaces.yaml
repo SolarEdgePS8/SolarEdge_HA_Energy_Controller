@@ -1,0 +1,44 @@
+# SolarEdge HA Energy Controller · neutrale externe Schnittstellen
+# Externe Automationen sind optional. Leere Mappings ergeben sichere AUS-Werte.
+
+template:
+  - binary_sensor:
+      - name: "SE NF External EV Charging"
+        unique_id: se_nf_external_ev_charging
+        icon: mdi:ev-station
+        state: >-
+          {% set e = states('input_text.se_nf_external_ev_charging_entity') | trim %}
+          {{ e not in ['', 'unknown', 'unavailable', 'none', 'None'] and is_state(e, 'on') }}
+        availability: "true"
+
+      - name: "SE NF External Discharge Lock"
+        unique_id: se_nf_external_discharge_lock
+        icon: mdi:battery-lock
+        state: >-
+          {% set e = states('input_text.se_nf_external_discharge_lock_entity') | trim %}
+          {{ e not in ['', 'unknown', 'unavailable', 'none', 'None'] and is_state(e, 'on') }}
+        availability: "true"
+
+      - name: "SE NF External Peak Lock"
+        unique_id: se_nf_external_peak_lock
+        icon: mdi:chart-bell-curve
+        state: >-
+          {% set e = states('input_text.se_nf_external_peak_lock_entity') | trim %}
+          {{ e not in ['', 'unknown', 'unavailable', 'none', 'None'] and is_state(e, 'on') }}
+        availability: "true"
+
+      - name: "SE NF Controller Write Enabled"
+        unique_id: se_nf_controller_write_enabled
+        icon: mdi:shield-lock-open
+        state: >-
+          {{
+            is_state('input_boolean.se_netzdienlich_enabled', 'on')
+            and is_state('input_boolean.se_nf_site_config_confirmed', 'on')
+            and is_state('sensor.se_nf_config_check', 'ok')
+            and is_state('sensor.se_nf_sanity_check', 'ok')
+          }}
+        attributes:
+          master: "{{ states('input_boolean.se_netzdienlich_enabled') }}"
+          site_config: "{{ states('input_boolean.se_nf_site_config_confirmed') }}"
+          config_check: "{{ states('sensor.se_nf_config_check') }}"
+          sanity_check: "{{ states('sensor.se_nf_sanity_check') }}"

@@ -1,0 +1,109 @@
+# SolarEdge Energy Controller · portabler Discharge-Limit Writer
+# Der Writer nutzt ausschließlich interne Controller-Signale und optionale neutrale Eingänge.
+# Bei ausgeschaltetem Master oder unbestätigter Site-Konfiguration erfolgen keine Writes.
+
+input_text:
+  se_discharge_limit_writer_last_reason:
+    name: "SE Discharge-Limit Writer letzter Grund"
+    max: 80
+    initial: "startup"
+
+automation:
+  - id: se_low_price_discharge_lock
+    alias: "SolarEdge Energy Controller: Discharge-Limit Writer"
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/1"
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - input_boolean.se_nf_site_config_confirmed
+          - input_text.se_nf_discharge_limit_entity
+          - input_number.se_nf_closed_discharge_limit_w
+          - input_number.se_nf_open_discharge_limit_w
+          - binary_sensor.se_nf_controller_write_enabled
+          - binary_sensor.se_nf_external_ev_charging
+          - binary_sensor.se_nf_external_discharge_lock
+          - binary_sensor.se_nf_external_peak_lock
+          - binary_sensor.se_nf_evcc_grid_charge_request
+          - binary_sensor.se_nf_evopt_discharge_lock_request
+          - binary_sensor.se_nf_evopt_grid_charge_request
+    action:
+      - delay: >-
+          {% if trigger.platform == 'homeassistant' %}00:02:30{% else %}00:00:00{% endif %}
+      - variables:
+          write_enabled: "{{ is_state('binary_sensor.se_nf_controller_write_enabled', 'on') }}"
+          entity: "{{ states('input_text.se_nf_discharge_limit_entity') | trim }}"
+          entity_configured: "{{ entity not in ['', 'unknown', 'unavailable', 'none', 'None'] }}"
+          current_raw: "{{ states(entity) if entity_configured else 'unavailable' }}"
+          entity_available: "{{ entity_configured and current_raw not in ['unknown', 'unavailable', 'none', 'None', ''] }}"
+          current_w: "{{ current_raw | float(0) }}"
+          min_w: "{{ state_attr(entity, 'min') | float(0) if entity_configured else 0 }}"
+          max_w: "{{ state_attr(entity, 'max') | float(5000) if entity_configured else 5000 }}"
+          closed_cfg: "{{ states('input_number.se_nf_closed_discharge_limit_w') | float(0) }}"
+          open_cfg: "{{ states('input_number.se_nf_open_discharge_limit_w') | float(5000) }}"
+          closed_w: "{{ [[closed_cfg, min_w] | max, max_w] | min }}"
+          open_w: "{{ [[open_cfg, min_w] | max, max_w] | min }}"
+          external_ev: "{{ is_state('binary_sensor.se_nf_external_ev_charging', 'on') }}"
+          external_lock: "{{ is_state('binary_sensor.se_nf_external_discharge_lock', 'on') }}"
+          external_peak: "{{ is_state('binary_sensor.se_nf_external_peak_lock', 'on') }}"
+          evcc_grid_charge: "{{ is_state('binary_sensor.se_nf_evcc_grid_charge_request', 'on') }}"
+          evopt_grid_charge: "{{ is_state('binary_sensor.se_nf_evopt_grid_charge_request', 'on') }}"
+          evopt_hold: "{{ is_state('binary_sensor.se_nf_evopt_discharge_lock_request', 'on') }}"
+          target_reason: >-
+            {% if external_lock %}
+              external_discharge_lock
+            {% elif external_ev %}
+              external_ev_charging
+            {% elif external_peak %}
+              external_peak_lock
+            {% elif evopt_grid_charge %}
+              evopt_charge
+            {% elif evopt_hold %}
+              evopt_hold
+            {% elif evcc_grid_charge %}
+              evcc_grid_charge
+            {% else %}
+              default
+            {% endif %}
+          lock_requested: "{{ target_reason | trim != 'default' }}"
+          target_w: "{{ closed_w if lock_requested else open_w }}"
+          delta_w: "{{ (current_w - target_w) | abs }}"
+          age_s: >-
+            {% set st = states[entity] if entity_configured and entity in states else none %}
+            {% set ts = as_timestamp(st.last_changed, default=0) if st is not none else 0 %}
+            {{ (as_timestamp(now()) - ts) | int(999999) }}
+          cooldown_ok: "{{ age_s | int(999999) >= 30 }}"
+          write_allowed: >-
+            {{
+              write_enabled
+              and entity_available
+              and delta_w | float(0) >= 5
+              and cooldown_ok
+            }}
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ write_allowed }}"
+            sequence:
+              - service: number.set_value
+                target:
+                  entity_id: "{{ entity }}"
+                data:
+                  value: "{{ target_w | round(0) }}"
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.se_discharge_limit_writer_last_reason
+                data:
+                  value: "{{ target_reason | trim }}"
+              - service: logbook.log
+                data:
+                  name: "SE Discharge-Limit"
+                  message: >-
+                    Ziel={{ target_w | round(0) }}W, Grund={{ target_reason | trim }},
+                    vorher={{ current_w | round(0) }}W, Entity={{ entity }}.
+        default: []
