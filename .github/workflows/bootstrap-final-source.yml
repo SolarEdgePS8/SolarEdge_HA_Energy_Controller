@@ -17,66 +17,58 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - name: Checkout bootstrap branch
+      - name: Checkout bootstrap commit
         uses: actions/checkout@v4
         with:
           ref: agent/prepare-v0.1.0-rc.2
           fetch-depth: 0
 
-      - name: Verify and unpack source archive
+      - name: Reconstruct verified source tree
         shell: bash
         run: |
           set -euo pipefail
-          echo "3c76dedd772ce1bde1957dadd8436ebdf5d7084ad096504899e4b47fd639d849  bootstrap/source.tar.xz" | sha256sum -c -
+          cat bootstrap/base64/*.b64 | base64 --decode > /tmp/final-source.tar.xz
+          echo "3c76dedd772ce1bde1957dadd8436ebdf5d7084ad096504899e4b47fd639d849  /tmp/final-source.tar.xz" | sha256sum -c -
           rm -rf /tmp/final-source
           mkdir -p /tmp/final-source
-          tar -xJf bootstrap/source.tar.xz -C /tmp/final-source
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a /tmp/final-source/. .
-          chmod +x scripts/*.sh scripts/validation/*.sh audit/*.sh validation/tools/*.sh validation/tools/*.py 2>/dev/null || true
+          tar -xJf /tmp/final-source.tar.xz -C /tmp/final-source
 
-      - name: Install validation dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
-
-      - name: Read-only release gate
-        run: python3 audit/readonly_audit.py . --release-gate
-
-      - name: Python syntax
+      - name: Validate complete source tree
         shell: bash
+        working-directory: /tmp/final-source
         run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -q -r requirements-dev.txt
+          python3 audit/readonly_audit.py . --release-gate
           python3 - <<'PY'
           from pathlib import Path
           for root in [Path('audit'), Path('scripts'), Path('tests'), Path('validation/tools')]:
+              if not root.exists():
+                  continue
               for path in root.rglob('*.py'):
                   compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          print('PYTHON_SYNTAX=PASS')
           PY
-
-      - name: Shell syntax
-        shell: bash
-        run: find scripts audit validation/tools -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-
-      - name: Mode and writer contracts
-        run: pytest -q -p no:cacheprovider
-
-      - name: Build and verify release archive
-        shell: bash
-        run: |
-          set -euo pipefail
+          find scripts audit validation/tools -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          pytest -q -p no:cacheprovider
+          rm -rf dist /tmp/release-check
           bash scripts/build_release.sh dist 0.1.0-rc.2
-          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip"
-          unzip -t "$ZIP"
-          rm -rf /tmp/release-check
+          unzip -t dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip
           mkdir -p /tmp/release-check
-          unzip -q "$ZIP" -d /tmp/release-check
+          unzip -q dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip -d /tmp/release-check
           python3 /tmp/release-check/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py /tmp/release-check/SolarEdge_HA_Energy_Controller
 
-      - name: Commit verified clean source tree
+      - name: Replace bootstrap with verified source
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf dist
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/final-source/. .
+          rm -rf dist .pytest_cache
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -name '*.pyc' -delete
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "Vollständigen RC2-Quellstand mit MIT-Lizenz einspielen"
-          git push
+          git commit -m "Vollständigen geprüften RC2-Quellstand einspielen"
+          git push origin HEAD:agent/prepare-v0.1.0-rc.2
