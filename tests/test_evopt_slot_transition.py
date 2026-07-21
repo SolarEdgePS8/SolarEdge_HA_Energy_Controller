@@ -102,3 +102,10 @@ def test_permissive_transitions_are_delayed_without_legacy_fallback() -> None:
     assert "slot_override_suggestion_mismatch" in (
         ROOT / "scripts/runtime/se_nf_evopt_shadow_adapter.py"
     ).read_text(encoding="utf-8")
+
+
+def test_restrictive_holdcharge_is_immediate_even_before_helper_delay_updates() -> None:
+    evopt = (ROOT / "package/se_controller_50_mode_evopt.yaml").read_text(encoding="utf-8")
+    writer = (ROOT / "package/se_controller_80_charge_writer.yaml").read_text(encoding="utf-8")
+    assert "action_raw == 'holdcharge' or charge_block" in evopt
+    assert "sensor.se_nf_evopt_action_raw') != 'holdcharge'" in writer
