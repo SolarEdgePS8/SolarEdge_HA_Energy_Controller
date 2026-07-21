@@ -1,4 +1,4 @@
-# SolarEdge Energy Controller v0.0.1 · Einziger Charge-Limit Writer
+# SolarEdge HA Energy Controller v0.1.0-rc.3 · Einziger Charge-Limit Writer
 # 0 W = Laden sperren, 5000 W = Laden freigeben. Kein anderer Modus schreibt direkt.
 
 automation:
@@ -21,6 +21,8 @@ automation:
           - sensor.se_nf_sanity_check
           - sensor.se_nf_charge_limit_actual
           - binary_sensor.se_nf_evopt_active_control
+          - sensor.se_nf_evopt_action_raw
+          - binary_sensor.se_nf_evopt_charge_block_request
           - sensor.se_nf_evopt_action_stable
           - sensor.se_nf_active_control_label
     action:
@@ -50,8 +52,9 @@ automation:
 
             {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
 
-            {% set evopt_open = selected == 'EVOpt optimiert' and is_state('binary_sensor.se_nf_evopt_active_control','on') and states('sensor.se_nf_evopt_action_stable')
-            in ['normal','hold','charge'] %}
+            {% set evopt_open = selected == 'EVOpt optimiert'
+               and is_state('binary_sensor.se_nf_evopt_active_control','on')
+               and not is_state('binary_sensor.se_nf_evopt_charge_block_request','on') %}
 
             {% set self_open = selected == 'Eigenverbrauch maximieren' %}
 
