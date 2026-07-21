@@ -9,6 +9,7 @@ Der Release Candidate enthält:
 - Installer, Update, Migration und vollständigen dateibezogenen Rollback;
 - Site-Config-Mapping;
 - statische Audits, Runtime-Checker und Writer-Konfliktprüfung;
+- einen read-only EVOpt-Slot-Index-Livetest;
 - vollständige Erstinstallations- und Update-Dokumentation;
 - Release-ZIP, äußere SHA256-Datei, internes Manifest und interne `SHA256SUMS`.
 
@@ -78,6 +79,7 @@ Vor dem Merge auf `main` muss der read-only EVOpt-Live-Test vollständig enden m
 
 ```json
 {
+  "slot_advances": 2,
   "fallback_samples_after_grace": 0,
   "api_errors": 0,
   "errors": 0,
@@ -85,7 +87,9 @@ Vor dem Merge auf `main` muss der read-only EVOpt-Live-Test vollständig enden m
 }
 ```
 
-Der Test muss mehrere reale Planabschnitte einschließlich regulärer Viertelstundenwechsel erfassen. Währenddessen müssen `sensor.se_nf_evopt_status = healthy` und `binary_sensor.se_nf_evopt_active_control = on` bleiben.
+`slot_advances` zählt nur echte Erhöhungen des `slot_index` innerhalb desselben Optimizer-Plans. Eine Solver-Neuberechnung mit zurückgesetztem Index zählt nicht als regulärer Slotwechsel.
+
+Der Test muss mindestens zwei echte Slot-Index-Fortschaltungen erfassen. Währenddessen müssen `sensor.se_nf_evopt_status = healthy` und `binary_sensor.se_nf_evopt_active_control = on` bleiben.
 
 ## Veröffentlichung
 
