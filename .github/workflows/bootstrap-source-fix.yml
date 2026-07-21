@@ -26,7 +26,7 @@ jobs:
           : > /tmp/overlay.zip
           for sha in \
             72ee65852401311ea77a333663ecca400fbbeb21 \
-            174187369031cf952170bf871b69faba89bee170 \
+            817b0c75af00b4ded931d21033bbbc4c25bcfde2 \
             9aca068a5423a2a80b1cc9f2a0548ca0ba73afc5 \
             27f5b5eb56561f272dcce1ba9d6df504ecc253af \
             bf71815446d57bd4fefdeb499cb4f473194ab607 \
