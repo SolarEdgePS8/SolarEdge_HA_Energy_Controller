@@ -1,0 +1,62 @@
+name: Validate RC2
+
+on:
+  push:
+    branches:
+      - main
+      - agent/prepare-v0.1.0-rc.2
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Read-only release gate
+        run: python audit/readonly_audit.py . --release-gate
+
+      - name: Python syntax
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for root in [Path("audit"), Path("scripts"), Path("tests")]:
+              for path in root.rglob("*.py"):
+                  compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          PY
+
+      - name: Shell syntax
+        shell: bash
+        run: find scripts audit -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+
+      - name: Mode and writer contracts
+        run: pytest -q -p no:cacheprovider
+
+      - name: Build release archive
+        run: bash scripts/build_release.sh dist 0.1.0-rc.2
+
+      - name: Verify release ZIP and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip"
+          unzip -t "$ZIP"
+          mkdir extracted
+          unzip -q "$ZIP" -d extracted
+          python extracted/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py \
+            extracted/SolarEdge_HA_Energy_Controller
