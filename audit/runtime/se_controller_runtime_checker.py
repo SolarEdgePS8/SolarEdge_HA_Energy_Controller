@@ -14,14 +14,21 @@ from typing import Any
 VERSION = "0.1.0-rc.3"
 CONFIG_ROOT = Path(os.environ.get("CONFIG_ROOT", "/config"))
 MANIFEST = CONFIG_ROOT / ".se_controller_runtime_manifest.json"
-API = os.environ.get("HA_API_URL", "http://supervisor/core/api").rstrip("/")
-TOKEN = os.environ.get("SUPERVISOR_TOKEN", "").strip()
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "").strip()
+HA_TOKEN = os.environ.get("HA_TOKEN", "").strip()
+TOKEN = SUPERVISOR_TOKEN or HA_TOKEN
+DEFAULT_API = "http://supervisor/core/api" if SUPERVISOR_TOKEN else "http://127.0.0.1:8123/api"
+API = os.environ.get("HA_API_URL", DEFAULT_API).rstrip("/")
 
 
 class HomeAssistant:
     def get(self, path: str) -> Any:
         if not TOKEN:
-            raise RuntimeError("SUPERVISOR_TOKEN fehlt")
+            raise RuntimeError(
+                "Kein Home-Assistant-API-Token verfügbar. "
+                "HA OS/Supervised: Terminal-Add-on verwenden. "
+                "Container/Core: HA_TOKEN und optional HA_API_URL setzen."
+            )
         req = urllib.request.Request(
             API + path,
             method="GET",
