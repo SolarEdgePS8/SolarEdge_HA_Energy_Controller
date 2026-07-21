@@ -18,10 +18,10 @@ RC3 behebt falsche EVOpt-Rückfälle an 15-Minuten-Slotwechseln. Die Suggestion 
 Der Stand wurde auf einer Referenzinstallation installiert und mit folgenden Prüfungen bestätigt:
 
 - 18 Package-YAML-Dateien und fünf Runtime-/Audit-Dateien installiert;
-- `ha core check`, Config Check und Sanity Check erfolgreich;
+- Home-Assistant-Konfigurationsprüfung, Config Check und Sanity Check erfolgreich;
 - Runtime-Manifest und alle 23 installierten Projektdateien per SHA256 geprüft;
 - reale EVOpt-Slotwechsel ohne Ausfall von `active_control` und ohne unnötigen 0/5000-W-Fallback;
-- GitHub Actions mit Release-Gate, Syntax-, Vertrags-, ZIP- und Manifestprüfung.
+- GitHub Actions mit Release-Gate, Syntax-, Vertrags-, Installer-, ZIP- und Manifestprüfung.
 
 Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarEdge-Modelle, Integrationen und Entity-Namen müssen über das Site-Mapping angepasst und auf der jeweiligen Anlage geprüft werden.
 
@@ -34,15 +34,77 @@ Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarE
 - Installation, Update, Migration und vollständiger Rollback;
 - Runtime-, Datei- und Konfliktprüfung;
 - optionale Wetter-, SQL-, evcc- und EVOpt-Anbindung;
+- Installationswege für Home Assistant OS, Supervised, Container und Core;
 - Dokumentation für Erstinstallation und Update.
 
 ## Was nicht enthalten ist
 
 Keine privaten Fahrzeug-, Wallbox-, Wärmepumpen-, Shelly-, Strompreis-, Backup-Reserve- oder Akku-Saver-Automationen. Solche Systeme können nur über neutrale optionale Eingangssignale angebunden werden.
 
-## Schnellstart für eine Erstinstallation
+## Unterstützte Home-Assistant-Installationen
 
-Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, aktivierten Packages und einem vollständigen Backup.
+| Installation | Unterstützung |
+|---|---|
+| Home Assistant OS | vollständig automatisiert über `/config`, `/share`, `ha` und `SUPERVISOR_TOKEN` |
+| Home Assistant Supervised | vollständig automatisiert, sofern Supervisor-CLI und Token verfügbar sind |
+| Home Assistant Container | unterstützt über `CONFIG_ROOT`, `SHARE_ROOT`, `HA_TOKEN`, `HA_API_URL` und `HA_CHECK_COMMAND` |
+| Home Assistant Core | unterstützt über lokale Pfade, Long-Lived Access Token und Python-Konfigurationsprüfung |
+
+Die genauen Befehle stehen unter [Installation auf verschiedenen Home-Assistant-Systemen](docs/09_INSTALLATION_VARIANTS.md).
+
+## Was benötigt wird
+
+Unabhängig vom gewählten Modus werden benötigt:
+
+- schreibbares SolarEdge-Charge-Limit als `number.*` in Watt;
+- Akku-Ladestand in Prozent;
+- nutzbare Akkukapazität;
+- PV-Prognose heute verbleibend, heute gesamt und morgen in kWh;
+- aktuelle PV-Leistung in Watt;
+- aktueller Hausverbrauch in Watt;
+- aktivierte Home-Assistant-Packages;
+- vollständiges Backup;
+- eindeutiges Site-Mapping ohne zweiten Writer auf demselben SolarEdge-Ziel.
+
+`LIVE_PV_POWER_ENTITIES` und `LIVE_CONSUMPTION_POWER_ENTITIES` erwarten Momentanleistung in **W**, keine Energiezähler in `kWh`. Ein Sensorname mit `_filtered` ist optional und kein Pflichtsensor.
+
+## evcc und Optimizer
+
+**evcc ist nur für den Modus `EVOpt optimiert` erforderlich.** Die übrigen drei Modi funktionieren ohne evcc.
+
+Für EVOpt werden zusätzlich benötigt:
+
+- laufendes evcc;
+- eingerichteter Batteriespeicher;
+- aktivierter evcc Optimizer mit gültigem Plan;
+- von Home Assistant erreichbare evcc-API;
+- eindeutiger Batterietitel und bei Bedarf Batteriename.
+
+Die konfigurierte Basis-URL enthält weder `/api` noch `/api/state`:
+
+```dotenv
+EVOPT_ENABLED=YES
+EVOPT_BASE_URL=http://evcc-host:7070
+EVOPT_BATTERY_TITLE=SolarEdge Akku
+EVOPT_BATTERY_NAME=
+```
+
+Prüfung vor Aktivierung:
+
+```bash
+curl -fsS http://evcc-host:7070/api/state \
+  | python3 -c "import json,sys; data=json.load(sys.stdin); print('EVCC_API=OK', 'evopt' in data)"
+```
+
+Erwartet:
+
+```text
+EVCC_API=OK True
+```
+
+Der EVOpt-Adapter liest nur. Er schreibt niemals direkt auf SolarEdge. Erst Safety, Arbiter und der einzige Writer erzeugen eine freigegebene Anforderung. Bei ungültigen oder nicht erreichbaren EVOpt-Daten fällt der Controller vollständig auf `Netzdienlich laden` zurück.
+
+## Schnellstart für Home Assistant OS / Supervised
 
 1. Die beiden Release-Dateien nach `/share` kopieren:
 
@@ -51,13 +113,16 @@ Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, akti
    SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
    ```
 
-2. Release-Prüfsumme kontrollieren und entpacken:
+2. Prüfsumme kontrollieren und in einen leeren Ordner entpacken:
 
    ```bash
    cd /share
    sha256sum -c SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
-   unzip -q SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
-   cd /share/SolarEdge_HA_Energy_Controller
+   rm -rf /share/se_controller_release_rc3
+   mkdir -p /share/se_controller_release_rc3
+   unzip -q SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip \
+     -d /share/se_controller_release_rc3
+   cd /share/se_controller_release_rc3/SolarEdge_HA_Energy_Controller
    ```
 
    Erwartet:
@@ -66,7 +131,7 @@ Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, akti
    SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip: OK
    ```
 
-3. Controller-Dateien installieren:
+3. Controller-Dateien installieren und Home Assistant neu starten:
 
    ```bash
    bash scripts/install_package.sh
@@ -79,7 +144,7 @@ Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, akti
    cp config/site_config.env.example config/site_config.env
    ```
 
-   `config/site_config.env` mit den eigenen Entity-IDs bearbeiten und erst nach vollständiger Prüfung setzen:
+   Eigene Entity-IDs eintragen. Erst nach vollständiger Kontrolle setzen:
 
    ```dotenv
    SITE_CONFIG_CONFIRMED=YES
@@ -96,12 +161,27 @@ Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, akti
 
 Die vollständigen Schritte, Pflichtsensoren, EVOpt-Konfiguration, erwarteten Zustände und der Rollback stehen in der [Erstinstallation](docs/02_FIRST_INSTALL.md). Bestehende Installationen verwenden ausschließlich die [Update-Anleitung](docs/05_UPDATE.md).
 
+## Installer-Sicherheitsmechanismen
+
+Der Installer:
+
+- erkennt Erstinstallation und bestehende Installation;
+- schaltet bei einer bestehenden Installation zuerst den Controller-Master aus;
+- bricht ohne API-Token ab, wenn der sichere Masterzustand nicht bestätigt werden kann;
+- erstellt vor jeder Änderung ein dateibezogenes Backup;
+- kopiert ausschließlich Projektdateien;
+- erzeugt ein Runtime-Manifest mit Version, Quellcommit und SHA256 aller 23 installierten Dateien;
+- führt eine Home-Assistant-Konfigurationsprüfung aus;
+- rollt bei Fehlern automatisch zurück;
+- lässt den Controller-Master ausgeschaltet.
+
 ## Dokumentation
 
 ### Installation und Betrieb
 
 - [Voraussetzungen](docs/01_REQUIREMENTS.md)
 - [Erstinstallation](docs/02_FIRST_INSTALL.md)
+- [Installation auf OS, Supervised, Container und Core](docs/09_INSTALLATION_VARIANTS.md)
 - [Entity-Mapping](docs/03_ENTITY_MAPPING.md)
 - [Erster Start](docs/04_FIRST_START.md)
 - [Update](docs/05_UPDATE.md)
@@ -139,7 +219,7 @@ Die vollständigen Schritte, Pflichtsensoren, EVOpt-Konfiguration, erwarteten Zu
 - Site-Konfiguration, Config Check und Sanity Check müssen gültig sein.
 - Leere optionale Writer-Mappings deaktivieren den jeweiligen Writer.
 - EVOpt schreibt nie direkt auf SolarEdge; der Adapter liefert nur eine Anforderung.
-- Fehlende oder ungültige EVOpt-Daten führen zum Fallback „Netzdienlich laden“.
+- Fehlende oder ungültige EVOpt-Daten führen zum Fallback `Netzdienlich laden`.
 - Vor jedem Installations- oder Updatevorgang wird ein dateibezogenes Backup erzeugt.
 - Weitere Automationen dürfen nicht auf dieselben gemappten SolarEdge-Ziele schreiben.
 
