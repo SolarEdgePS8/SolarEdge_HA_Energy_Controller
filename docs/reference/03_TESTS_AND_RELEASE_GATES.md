@@ -43,6 +43,7 @@ Das erzeugte ZIP enthält:
 - 18 Controller-Package-YAMLs;
 - fünf Runtime-/Audit-Dateien;
 - Installations-, Update-, Migrations- und Rollback-Skripte;
+- den read-only EVOpt-Slot-Livetest;
 - Site-Config-Beispiel;
 - Dokumentation;
 - internes `validation/release_manifest.json`;
@@ -77,19 +78,43 @@ EXTERNAL_WRITER_CONFLICTS=PASS
 EVOPT_SLOT_LIVE_TEST=PASS
 ```
 
-Der EVOpt-Live-Test ist read-only. Er verändert keine Helper und schreibt nicht auf SolarEdge. Er muss mehrere reale Planabschnitte einschließlich regulärer Viertelstundenwechsel beobachten.
+## Read-only EVOpt-Slot-Livetest
+
+Der Test verändert keine Helper und schreibt nicht auf SolarEdge. Er unterscheidet ausdrücklich zwischen:
+
+- **echter Slot-Fortschaltung:** `slot_index` steigt innerhalb desselben Optimizer-Plans;
+- **Solver-Replan:** `updated` ändert sich und `slot_index` beginnt wieder bei 0.
+
+Dadurch zählt eine bloße Neuberechnung nicht fälschlich als bestandener 15-Minuten-Slotwechsel.
+
+Aus dem entpackten Release-Ordner:
+
+```bash
+python3 scripts/rc3_evopt_slot_live_test.py \
+  --minutes 50 \
+  --interval 10 \
+  --minimum-slot-advances 2
+```
+
+Der vollständige Bericht wird geschrieben nach:
+
+```text
+/share/rc3_evopt_slot_live_test_report.json
+```
 
 Erwarteter Abschluss:
 
 ```json
 {
-  "slot_transitions": 2,
+  "slot_advances": 2,
   "fallback_samples_after_grace": 0,
   "api_errors": 0,
   "errors": 0,
   "pass": true
 }
 ```
+
+`slot_advances` darf größer als 2 sein. Entscheidend ist, dass mindestens zwei echte Index-Fortschaltungen innerhalb eines unveränderten Plans beobachtet wurden.
 
 Während des Tests müssen `sensor.se_nf_evopt_status = healthy` und `binary_sensor.se_nf_evopt_active_control = on` bleiben. Ein gültiger Slotwechsel darf keinen unnötigen Fallback und keinen zusätzlichen 0/5000-W-Schreibzyklus verursachen.
 
