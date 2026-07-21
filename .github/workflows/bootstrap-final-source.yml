@@ -1,4 +1,4 @@
-name: Bootstrap verified RC2 source
+name: Bootstrap final verified RC2 source
 
 on:
   push:
@@ -12,26 +12,23 @@ jobs:
   bootstrap:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - name: Checkout
+      - name: Checkout bootstrap commit
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Reconstruct verified source tree
+      - name: Verify and unpack source archive
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/1afea928f5c410342baad1f97bd9a223ad72e0fd" --jq .content \
-            | tr -d '\n' \
-            | base64 --decode > /tmp/source.tar.xz
-          echo "3c76dedd772ce1bde1957dadd8436ebdf5d7084ad096504899e4b47fd639d849  /tmp/source.tar.xz" | sha256sum -c -
-          rm -rf /tmp/source
-          mkdir -p /tmp/source
-          tar -xJf /tmp/source.tar.xz -C /tmp/source
+          echo "3c76dedd772ce1bde1957dadd8436ebdf5d7084ad096504899e4b47fd639d849  bootstrap/source.tar.xz" | sha256sum -c -
+          rm -rf /tmp/final-source
+          mkdir -p /tmp/final-source
+          tar -xJf bootstrap/source.tar.xz -C /tmp/final-source
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a /tmp/source/. .
+          cp -a /tmp/final-source/. .
           chmod +x scripts/*.sh scripts/validation/*.sh audit/*.sh validation/tools/*.sh validation/tools/*.py 2>/dev/null || true
 
       - name: Install validation dependencies
@@ -57,18 +54,25 @@ jobs:
       - name: Mode and writer contracts
         run: pytest -q -p no:cacheprovider
 
-      - name: Release build
-        shell: bash
-        run: |
-          bash scripts/build_release.sh dist 0.1.0-rc.2
-          unzip -t dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip
-
-      - name: Commit verified source
+      - name: Build and verify release archive
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/build_release.sh dist 0.1.0-rc.2
+          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip"
+          unzip -t "$ZIP"
+          rm -rf /tmp/release-check
+          mkdir -p /tmp/release-check
+          unzip -q "$ZIP" -d /tmp/release-check
+          python3 /tmp/release-check/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py /tmp/release-check/SolarEdge_HA_Energy_Controller
+
+      - name: Commit verified clean source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Vollständigen RC2-Quellstand einspielen"
+          git commit -m "Vollständigen RC2-Quellstand mit MIT-Lizenz einspielen"
           git push
