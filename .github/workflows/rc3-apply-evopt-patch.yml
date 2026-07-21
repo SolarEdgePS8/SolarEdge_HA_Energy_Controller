@@ -1,0 +1,66 @@
+name: Apply RC3 EVOpt slot-transition fix
+
+on:
+  push:
+    branches:
+      - fix/rc3-release-hardening
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout RC3 branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/rc3-release-hardening
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Apply deterministic EVOpt patch
+        run: python scripts/dev/apply_rc3_evopt_patch.py
+
+      - name: Validate YAML, Python and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in sorted(Path('package').glob('*.yaml')):
+              yaml.safe_load(path.read_text(encoding='utf-8'))
+          for root in [Path('audit'), Path('scripts'), Path('tests')]:
+              for path in root.rglob('*.py'):
+                  compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          print('SYNTAX_AND_YAML=PASS')
+          PY
+          pytest -q -p no:cacheprovider
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -name '*.pyc' -delete
+          python audit/readonly_audit.py . --release-gate
+
+      - name: Commit patched controller files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package/se_controller_50_mode_evopt.yaml package/se_controller_80_charge_writer.yaml
+          if git diff --cached --quiet; then
+            echo "PATCH_ALREADY_APPLIED=YES"
+            exit 0
+          fi
+          git commit -m "RC3: EVOpt-Slotwechsel ohne Legacy-Fallback absichern"
+          git push origin HEAD:fix/rc3-release-hardening
