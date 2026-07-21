@@ -54,6 +54,7 @@ automation:
 
             {% set evopt_open = selected == 'EVOpt optimiert'
                and is_state('binary_sensor.se_nf_evopt_active_control','on')
+               and states('sensor.se_nf_evopt_action_raw') != 'holdcharge'
                and not is_state('binary_sensor.se_nf_evopt_charge_block_request','on') %}
 
             {% set self_open = selected == 'Eigenverbrauch maximieren' %}

@@ -584,9 +584,11 @@ template:
 
           {% set source = states('sensor.se_nf_evopt_candidate_source') %}
 
+          {% set action_raw = states('sensor.se_nf_evopt_action_raw') %}
+
           {% set charge_block = is_state('binary_sensor.se_nf_evopt_charge_block_request', 'on') %}
 
-          {% if source == 'evopt' and charge_block %}
+          {% if source == 'evopt' and (action_raw == 'holdcharge' or charge_block) %}
             {{ closed_w | round(0) }}
           {% elif source == 'evopt' %}
             {{ open_w | round(0) }}
