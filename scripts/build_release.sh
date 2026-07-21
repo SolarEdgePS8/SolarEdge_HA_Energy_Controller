@@ -3,7 +3,7 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/dist}"
-VERSION="${2:-0.1.0-rc.2}"
+VERSION="${2:-0.1.0-rc.3}"
 
 python3 "$ROOT/audit/readonly_audit.py" "$ROOT" --release-gate
 
@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -23,6 +25,17 @@ root = Path(sys.argv[1]).resolve()
 out = Path(sys.argv[2]).resolve()
 version = sys.argv[3]
 out.mkdir(parents=True, exist_ok=True)
+
+source_commit = os.environ.get("GITHUB_SHA", "").strip()
+if not source_commit:
+    try:
+        source_commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        source_commit = ""
 
 name = f"SolarEdge_HA_Energy_Controller_v{version}"
 zip_path = out / f"{name}.zip"
@@ -71,6 +84,7 @@ with tempfile.TemporaryDirectory(prefix="se_controller_release_") as tmp:
     manifest = {
         "project": "SolarEdge_HA_Energy_Controller",
         "version": version,
+        "source_commit": source_commit or None,
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "files": entries,
     }
