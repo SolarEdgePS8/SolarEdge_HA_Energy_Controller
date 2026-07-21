@@ -9,6 +9,9 @@ BACKUP="$SHARE/se_controller_backup_$STAMP"
 ACTIONS="$BACKUP/backup_actions.tsv"
 RUNTIME_MANIFEST=".se_controller_runtime_manifest.json"
 
+# shellcheck source=scripts/lib/ha_environment.sh
+. "$ROOT/scripts/lib/ha_environment.sh"
+
 log() { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
 rollback_now() {
@@ -19,12 +22,11 @@ rollback_now() {
   exit "$code"
 }
 
-mkdir -p "$BACKUP/content" "$CONFIG/packages"
+mkdir -p "$BACKUP/content" "$CONFIG/packages" "$SHARE"
 : >"$ACTIONS"
-trap rollback_now ERR
+trap rollback_now ERR INT TERM
 
-SE_CONTROLLER_DRY_RUN="${SE_CONTROLLER_DRY_RUN:-0}" \
-  python3 "$ROOT/scripts/apply_site_config.py" --master-off-only
+ensure_controller_master_off
 
 copy_with_backup() {
   src="$1"; dst="$2"; rel="$3"
@@ -91,9 +93,10 @@ PY
 
 printf '%s\n' "$BACKUP" >"$SHARE/se_controller_last_backup.txt"
 
-ha core check
+run_ha_config_check
 
-trap - ERR
-log "Installationsdateien und HA-Konfiguration geprüft."
+trap - ERR INT TERM
+log "Installationsdateien und Home-Assistant-Konfiguration geprüft."
+log "Installiert: 18 Package-Dateien und 5 Runtime-/Audit-Dateien."
 log "Backup: $BACKUP"
 log "Controller-Master bleibt AUS."
