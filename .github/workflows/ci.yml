@@ -48,6 +48,76 @@ jobs:
       - name: Mode and writer contracts
         run: pytest -q -p no:cacheprovider
 
+      - name: Installer portability, manifest and rollback simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          CONFIG="$TMP/config"
+          SHARE="$TMP/share"
+          mkdir -p "$CONFIG/packages" "$SHARE"
+
+          CONFIG_ROOT="$CONFIG" \
+          SHARE_ROOT="$SHARE" \
+          SE_CONTROLLER_DRY_RUN=1 \
+          HA_CHECK_COMMAND=true \
+            bash scripts/install_package.sh
+
+          python - "$CONFIG" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          config = Path(sys.argv[1])
+          manifest = json.loads(
+              (config / ".se_controller_runtime_manifest.json").read_text(encoding="utf-8")
+          )
+          assert manifest["project"] == "SolarEdge_HA_Energy_Controller"
+          assert manifest["version"] == "0.1.0-rc.3"
+          assert len(manifest["installed_files"]) == 23, manifest
+          for rel, expected in manifest["installed_files"].items():
+              path = config / rel
+              assert path.is_file(), rel
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, rel
+          print({"installed_files": 23, "hashes": "PASS"})
+          PY
+
+          # Bestehende Installation ohne Token muss vor Änderungen sicher abbrechen.
+          set +e
+          CONFIG_ROOT="$CONFIG" \
+          SHARE_ROOT="$SHARE" \
+          HA_CHECK_COMMAND=true \
+            bash scripts/install_package.sh
+          gate_rc=$?
+          set -e
+          test "$gate_rc" -ne 0
+
+          # Regulärer manueller Rollback der ersten Installation.
+          CONFIG_ROOT="$CONFIG" \
+          SHARE_ROOT="$SHARE" \
+          SE_CONTROLLER_DRY_RUN=1 \
+          HA_CHECK_COMMAND=true \
+            bash scripts/rollback.sh
+          test -z "$(find "$CONFIG/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit)"
+          test ! -f "$CONFIG/.se_controller_runtime_manifest.json"
+
+          # Fehler in der HA-Prüfung muss automatisch zurückrollen.
+          CONFIG2="$TMP/config_failure"
+          SHARE2="$TMP/share_failure"
+          mkdir -p "$CONFIG2/packages" "$SHARE2"
+          set +e
+          CONFIG_ROOT="$CONFIG2" \
+          SHARE_ROOT="$SHARE2" \
+          SE_CONTROLLER_DRY_RUN=1 \
+          HA_CHECK_COMMAND=false \
+            bash scripts/install_package.sh
+          failure_rc=$?
+          set -e
+          test "$failure_rc" -ne 0
+          test -z "$(find "$CONFIG2/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit)"
+          test ! -f "$CONFIG2/.se_controller_runtime_manifest.json"
+
       - name: Build release archive
         run: bash scripts/build_release.sh dist 0.1.0-rc.3
 
@@ -69,17 +139,20 @@ jobs:
           import json
           from pathlib import Path
 
+          root = Path("extracted/SolarEdge_HA_Energy_Controller")
           manifest = json.loads(
-              Path("extracted/SolarEdge_HA_Energy_Controller/validation/release_manifest.json")
-              .read_text(encoding="utf-8")
+              (root / "validation/release_manifest.json").read_text(encoding="utf-8")
           )
           assert manifest["project"] == "SolarEdge_HA_Energy_Controller"
           assert manifest["version"] == "0.1.0-rc.3"
           assert manifest.get("source_commit"), manifest
+          assert (root / "scripts/lib/ha_environment.sh").is_file()
+          assert (root / "docs/09_INSTALLATION_VARIANTS.md").is_file()
           print({
               "version": manifest["version"],
               "source_commit": manifest["source_commit"],
               "files": len(manifest["files"]),
+              "portable_installer": True,
               "pass": True,
           })
           PY
@@ -126,16 +199,29 @@ jobs:
 
           RC3 verhindert falsche EVOpt-Fallbacks an regulären 15-Minuten-Slotwechseln und ergänzt präzise Übergangsdiagnosen.
 
+          ### Unterstützte Installationen
+
+          - Home Assistant OS
+          - Home Assistant Supervised
+          - Home Assistant Container
+          - Home Assistant Core
+
+          Für Container/Core werden lokale Pfade, ein Long-Lived Access Token und gegebenenfalls `HA_CHECK_COMMAND` benötigt.
+
           ### Installation
 
-          1. ZIP und `.sha256` aus den Release-Assets nach `/share` kopieren.
+          1. ZIP und `.sha256` aus den Release-Assets in einen lokalen Arbeitsordner kopieren.
           2. Prüfsumme mit `sha256sum -c` kontrollieren.
           3. ZIP in einen leeren Ordner entpacken.
           4. `bash scripts/install_package.sh` ausführen.
           5. Home Assistant neu starten, `site_config.env` konfigurieren und `bash scripts/run_first_checks.sh` ausführen.
           6. Den Controller-Master erst nach `PASS=True` einschalten.
 
-          Die vollständige Erstinstallation und die separate Update-Anleitung stehen im Repository unter `docs/02_FIRST_INSTALL.md` und `docs/05_UPDATE.md`.
+          ### evcc Optimizer
+
+          evcc ist nur für `EVOpt optimiert` erforderlich. In `site_config.env` wird die evcc-Basis-URL ohne `/api/state` eingetragen. Der Adapter liest den Optimizer-Plan read-only; Safety, Arbiter und Writer bleiben vorgeschaltet.
+
+          Die vollständige Erstinstallation, Update-Anleitung und installationsspezifischen Befehle stehen unter `docs/02_FIRST_INSTALL.md`, `docs/05_UPDATE.md` und `docs/09_INSTALLATION_VARIANTS.md`.
 
           Dieses Release ist ein Prerelease und noch kein stabiler v1.0-Stand.
           EOF
