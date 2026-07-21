@@ -14,12 +14,16 @@ RUNTIME_MANIFEST=".se_controller_runtime_manifest.json"
 
 log() { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
-rollback_now() {
-  code=$?
-  trap - ERR
+rollback_with_code() {
+  code="$1"
+  trap - ERR INT TERM
   log "Installation fehlgeschlagen. Automatischer Rollback."
   bash "$ROOT/scripts/rollback.sh" "$BACKUP" || true
   exit "$code"
+}
+
+rollback_now() {
+  rollback_with_code "$?"
 }
 
 mkdir -p "$BACKUP/content" "$CONFIG/packages" "$SHARE"
@@ -93,7 +97,12 @@ PY
 
 printf '%s\n' "$BACKUP" >"$SHARE/se_controller_last_backup.txt"
 
-run_ha_config_check
+# Ein Fehler innerhalb einer Shell-Funktion löst nicht in jeder Bash-Konstellation
+# zuverlässig den ERR-Trap aus. Deshalb wird die zentrale HA-Prüfung explizit
+# ausgewertet und bei Fehlern garantiert zurückgerollt.
+if ! run_ha_config_check; then
+  rollback_with_code 2
+fi
 
 trap - ERR INT TERM
 log "Installationsdateien und Home-Assistant-Konfiguration geprüft."
