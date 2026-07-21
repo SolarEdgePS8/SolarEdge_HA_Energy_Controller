@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0-rc.3-test"
+VERSION = "0.1.0-rc.3"
 CONFIG_ROOT = Path(os.environ.get("CONFIG_ROOT", "/config"))
 MANIFEST = CONFIG_ROOT / ".se_controller_runtime_manifest.json"
 API = os.environ.get("HA_API_URL", "http://supervisor/core/api").rstrip("/")
