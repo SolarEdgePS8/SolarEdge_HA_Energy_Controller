@@ -4,12 +4,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-API = os.environ.get("HA_API_URL", "http://supervisor/core/api").rstrip("/")
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "").strip()
+HA_TOKEN = os.environ.get("HA_TOKEN", "").strip()
+TOKEN = SUPERVISOR_TOKEN or HA_TOKEN
+DEFAULT_API = "http://supervisor/core/api" if SUPERVISOR_TOKEN else "http://127.0.0.1:8123/api"
+API = os.environ.get("HA_API_URL", DEFAULT_API).rstrip("/")
 DRY_RUN = os.environ.get("SE_CONTROLLER_DRY_RUN", "") == "1"
 
 TEXT_MAP = {
@@ -67,15 +70,18 @@ def call(service: str, payload: dict[str, object], *, tolerate_missing: bool = F
     if DRY_RUN:
         print(f"DRY_RUN {service} {json.dumps(payload, ensure_ascii=False)}")
         return
-    token = os.environ.get("SUPERVISOR_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("SUPERVISOR_TOKEN fehlt")
+    if not TOKEN:
+        raise RuntimeError(
+            "Kein Home-Assistant-API-Token verfügbar. "
+            "HA OS/Supervised: Terminal-Add-on verwenden. "
+            "Container/Core: HA_TOKEN und optional HA_API_URL setzen."
+        )
     request = urllib.request.Request(
         f"{API}/services/{service}",
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
         headers={
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {TOKEN}",
             "Content-Type": "application/json",
         },
     )
@@ -135,7 +141,10 @@ if args.master_off_only:
 if not args.env:
     raise SystemExit("Pfad zu site_config.env fehlt")
 
-config = parse_env(Path(args.env))
+config_path = Path(args.env)
+if not config_path.is_file():
+    raise SystemExit(f"Site-Konfiguration fehlt: {config_path}")
+config = parse_env(config_path)
 if config.get("SITE_CONFIG_CONFIRMED", "").upper() != "YES":
     raise SystemExit("SITE_CONFIG_CONFIRMED muss YES sein")
 
