@@ -1,11 +1,12 @@
-name: Validate RC2
+name: Validate and publish RC3
 
 on:
   push:
     branches:
       - main
-      - agent/prepare-v0.1.0-rc.2
+      - fix/rc3-release-hardening
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,15 +49,101 @@ jobs:
         run: pytest -q -p no:cacheprovider
 
       - name: Build release archive
-        run: bash scripts/build_release.sh dist 0.1.0-rc.2
+        run: bash scripts/build_release.sh dist 0.1.0-rc.3
 
       - name: Verify release ZIP and manifest
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.2.zip"
+          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip"
+          SHA="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256"
+          test -f "$ZIP"
+          test -f "$SHA"
+          (cd dist && sha256sum -c "$(basename "$SHA")")
           unzip -t "$ZIP"
           mkdir extracted
           unzip -q "$ZIP" -d extracted
           python extracted/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py \
             extracted/SolarEdge_HA_Energy_Controller
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("extracted/SolarEdge_HA_Energy_Controller/validation/release_manifest.json")
+              .read_text(encoding="utf-8")
+          )
+          assert manifest["project"] == "SolarEdge_HA_Energy_Controller"
+          assert manifest["version"] == "0.1.0-rc.3"
+          assert manifest.get("source_commit"), manifest
+          print({
+              "version": manifest["version"],
+              "source_commit": manifest["source_commit"],
+              "files": len(manifest["files"]),
+              "pass": True,
+          })
+          PY
+
+      - name: Upload tested release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.3
+          path: |
+            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
+            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish v0.1.0-rc.3 prerelease
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download tested release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.3
+          path: release
+
+      - name: Publish GitHub prerelease once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v0.1.0-rc.3
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG existiert bereits; keine erneute Veröffentlichung."
+            exit 0
+          fi
+
+          cat > release-notes.md <<'EOF'
+          ## SolarEdge HA Energy Controller v0.1.0-rc.3
+
+          RC3 verhindert falsche EVOpt-Fallbacks an regulären 15-Minuten-Slotwechseln und ergänzt präzise Übergangsdiagnosen.
+
+          ### Installation
+
+          1. ZIP und `.sha256` aus den Release-Assets nach `/share` kopieren.
+          2. Prüfsumme mit `sha256sum -c` kontrollieren.
+          3. ZIP in einen leeren Ordner entpacken.
+          4. `bash scripts/install_package.sh` ausführen.
+          5. Home Assistant neu starten, `site_config.env` konfigurieren und `bash scripts/run_first_checks.sh` ausführen.
+          6. Den Controller-Master erst nach `PASS=True` einschalten.
+
+          Die vollständige Erstinstallation und die separate Update-Anleitung stehen im Repository unter `docs/02_FIRST_INSTALL.md` und `docs/05_UPDATE.md`.
+
+          Dieses Release ist ein Prerelease und noch kein stabiler v1.0-Stand.
+          EOF
+
+          gh release create "$TAG" \
+            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip \
+            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "SolarEdge HA Energy Controller v0.1.0-rc.3" \
+            --notes-file release-notes.md \
+            --prerelease
