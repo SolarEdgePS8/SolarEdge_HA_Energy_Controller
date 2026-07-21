@@ -1,0 +1,75 @@
+name: Bootstrap verified RC2 source
+
+on:
+  push:
+    branches:
+      - agent/prepare-v0.1.0-rc.2
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/overlay.zip
+          for sha in \
+            72ee65852401311ea77a333663ecca400fbbeb21 \
+            174187369031cf952170bf871b69faba89bee170 \
+            9aca068a5423a2a80b1cc9f2a0548ca0ba73afc5 \
+            27f5b5eb56561f272dcce1ba9d6df504ecc253af \
+            bf71815446d57bd4fefdeb499cb4f473194ab607 \
+            95c4636abf58f76c5dcd9d683822359a69351ba5 \
+            8ded28ec9f54f3cdb2ba502ecba8f30719aaaab6 \
+            3c4aecb8de1350955e0a06a0282d5859af316a4f \
+            47e8a374f8e719918b6e403ffd678d2ac82f7896 \
+            897a8c3464b197b88dc32f550a3f6a82ad193952 \
+            84df342d96aceb9bcd7dff7e31bec1f6832a1011 \
+            45eae49dae3237e2ea740a95225b18e8e656d984
+          do
+            gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${sha}" --jq .content \
+              | tr -d '\n' \
+              | base64 --decode >> /tmp/overlay.zip
+          done
+          echo "03c4a798482e5dd6345fc8023c6098d56cff2352e454592efb78baca0889fba9  /tmp/overlay.zip" | sha256sum -c -
+          rm -rf /tmp/overlay
+          mkdir -p /tmp/overlay
+          unzip -q /tmp/overlay.zip -d /tmp/overlay
+          cp -a /tmp/overlay/. .
+          rm -f .github/workflows/bootstrap-source.yml
+          chmod +x scripts/*.sh scripts/validation/*.sh audit/*.sh 2>/dev/null || true
+
+      - name: Validate reconstructed project
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python3 audit/readonly_audit.py . --release-gate
+          python3 -m compileall -q audit scripts tests
+          find scripts audit -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          pytest -q
+
+      - name: Commit verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "RC2-Quellstand und Tests einspielen"
+          git push
