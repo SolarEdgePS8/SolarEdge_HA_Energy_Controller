@@ -1,0 +1,572 @@
+# SolarEdge Energy Controller v0.0.1 · Gemeinsame Basisplanung
+# Zeitfenster, Energiebedarf und stabile Kompatibilitätssensoren.
+
+template:
+  - sensor:
+      - name: "SE NF Active Planned Start Timestamp"
+        unique_id: se_nf_active_planned_start_timestamp
+        icon: mdi:clock-start
+        state: >-
+          {% set planned_ts = as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) %}
+          {% set candidate_ts = states('sensor.se_nf_today_planned_start_candidate_timestamp') | int(0) %}
+          {% set min_hour = states('sensor.se_nf_mode_min_start_hour') | float(11.75) %}
+          {% set min_h = min_hour | int(0) %}
+          {% set min_m = ((min_hour - min_h) * 60) | round(0) | int(0) %}
+          {% set min_ts = as_timestamp(today_at('%02d:%02d:00' | format(min_h, min_m)), 0) | int(0) %}
+          {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+          {% set day_start_ts = as_timestamp(today_at('06:00:00'), 0) | int(0) %}
+          {% set now_ts = now().timestamp() | int(0) %}
+          {% set state_now = states('input_select.se_nf_session_state') %}
+          {% set active_session = state_now in ['open','battery_full_open'] %}
+          {% set critical_planned_valid =
+             is_state('input_boolean.se_nf_critical_deficit_latched_today','on')
+             and planned_ts > 0
+             and planned_ts >= day_start_ts
+             and planned_ts < end_ts
+             and is_state('sensor.se_nf_sanity_check','ok')
+             and is_state('sensor.se_nf_config_check','ok')
+             and is_state('binary_sensor.se_nf_risk_flag','off') %}
+          {% set regular_planned_valid = planned_ts >= min_ts and planned_ts < end_ts %}
+          {% set active_session_plan_valid =
+             active_session
+             and planned_ts >= day_start_ts
+             and planned_ts <= now_ts
+             and planned_ts < end_ts %}
+          {% set candidate_valid = candidate_ts >= min_ts and candidate_ts < end_ts %}
+          {% if regular_planned_valid or critical_planned_valid or active_session_plan_valid %}
+            {{ planned_ts }}
+          {% elif candidate_valid %}
+            {{ candidate_ts }}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          selected_source: >-
+            {% set planned_ts = as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) %}
+            {% set candidate_ts = states('sensor.se_nf_today_planned_start_candidate_timestamp') | int(0) %}
+            {% set min_hour = states('sensor.se_nf_mode_min_start_hour') | float(11.75) %}
+            {% set min_h = min_hour | int(0) %}
+            {% set min_m = ((min_hour - min_h) * 60) | round(0) | int(0) %}
+            {% set min_ts = as_timestamp(today_at('%02d:%02d:00' | format(min_h, min_m)), 0) | int(0) %}
+            {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+            {% set day_start_ts = as_timestamp(today_at('06:00:00'), 0) | int(0) %}
+            {% set now_ts = now().timestamp() | int(0) %}
+            {% set state_now = states('input_select.se_nf_session_state') %}
+            {% set active_session = state_now in ['open','battery_full_open'] %}
+            {% set critical_valid = is_state('input_boolean.se_nf_critical_deficit_latched_today','on') and planned_ts >= day_start_ts and planned_ts
+            < end_ts %}
+            {% set regular_valid = planned_ts >= min_ts and planned_ts < end_ts %}
+            {% set active_valid = active_session and planned_ts >= day_start_ts and planned_ts <= now_ts and planned_ts < end_ts %}
+            {% set candidate_valid = candidate_ts >= min_ts and candidate_ts < end_ts %}
+            {% if active_valid %}active_session_stored_plan
+            {% elif critical_valid %}critical_stored_plan
+            {% elif regular_valid %}stored_plan
+            {% elif candidate_valid %}candidate
+            {% else %}none
+            {% endif %}
+          stored_start_timestamp: >-
+            {{ as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) }}
+          candidate_start_timestamp: >-
+            {{ states('sensor.se_nf_today_planned_start_candidate_timestamp') | int(0) }}
+          window_end_timestamp: >-
+            {{ states('sensor.se_nf_today_end_timestamp') | int(0) }}
+          session_state: "{{ states('input_select.se_nf_session_state') }}"
+      - name: "SE NF Effective Target SoC Pct"
+        unique_id: se_nf_effective_target_soc_pct
+        unit_of_measurement: "%"
+        icon: mdi:battery-sync
+        state: >-
+          {% set mode = states('sensor.se_nf_planning_profile_effective') %}
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+          {% set candidate_raw = states('sensor.se_nf_resilience_target_pct') %}
+          {% set candidate = candidate_raw | float(0) if candidate_raw not in bad else 0 %}
+          {% set remaining_raw = states('sensor.se_nf_remaining_consumption_today') %}
+          {% set fallback = states('sensor.se_nf_lifetime_night_energy_forecast') | float(states('input_number.se_nf_lifetime_night_fallback_kwh')
+          | float(4.5)) %}
+          {% set remaining = remaining_raw | float(0) if remaining_raw not in bad and (remaining_raw | float(0)) > 0 else fallback %}
+          {% set factor = 1 + (states('input_number.se_nf_lifetime_soc_buffer_pct') | float(0)) / 100 %}
+          {% set safety = states('input_number.se_nf_lifetime_safety_kwh') | float(1.0) %}
+          {% set minimum = states('input_number.se_nf_lifetime_min_soc_pct') | float(45) %}
+          {% set maximum = states('input_number.se_nf_lifetime_max_soc_pct') | float(85) %}
+          {% set protected_load_target = reserve + (((remaining * factor) + safety) / cap * 100) if cap > 0 else maximum %}
+          {% if mode == 'Akku schonen' %}
+            {% set raw = [candidate, protected_load_target, minimum] | max %}
+            {{ [raw, maximum] | min | round(1) }}
+          {% else %}
+            {{ states('input_number.se_nf_target_soc_pct') | float(0) | round(1) }}
+          {% endif %}
+        attributes:
+          mode: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          planning_profile: "{{ states('sensor.se_nf_planning_profile_effective') }}"
+          source: >-
+            {% set candidate = states('sensor.se_nf_resilience_target_pct') %}
+            {{ 'max_resilience_and_protected_remaining_load' if candidate not in ['unknown','unavailable','none','None',''] and (candidate | float(0))
+            > 0 else 'protected_remaining_load' }}
+          logical_empty_soc_pct: "{{ states('sensor.se_nf_backup_reserve_pct') }}"
+          remaining_consumption_kwh: "{{ states('sensor.se_nf_remaining_consumption_today') }}"
+          consumption_buffer_pct: "{{ states('input_number.se_nf_lifetime_soc_buffer_pct') }}"
+          battery_safety_buffer_kwh: "{{ states('input_number.se_nf_lifetime_safety_kwh') }}"
+          resilience_target_pct: "{{ states('sensor.se_nf_resilience_target_pct') }}"
+          required_energy_kwh: "{{ states('sensor.se_nf_resilience_required_energy') }}"
+          planning_horizon: "{{ state_attr('sensor.se_nf_resilience_required_energy', 'planning_horizon') }}"
+          note: "V2.9.9a: Backup-Reserve ist logischer Nullpunkt. Ziel = Reserve + gepufferter Restverbrauch + Akku-Sicherheitspuffer; ein höheres
+            Resilienzziel bleibt erhalten."
+      - name: "SE NF Lifetime Night Energy Forecast"
+        unique_id: se_nf_lifetime_night_energy_forecast
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:weather-night
+        state: >-
+          {% set dynamic =
+            states('sensor.se_nf_night_consumption_7d_dynamic')
+          %}
+          {% set valid =
+            state_attr(
+              'sensor.se_nf_night_consumption_7d_dynamic',
+              'valid'
+            ) | default(false, true)
+          %}
+          {% set fallback =
+            states(
+              'input_number.se_nf_lifetime_night_fallback_kwh'
+            ) | float(4.5)
+          %}
+          {% if valid
+                and dynamic not in ['unknown','unavailable','none','']
+                and dynamic | float(0) > 0 %}
+            {{ dynamic | float(0) | round(2) }}
+          {% else %}
+            {{ fallback | round(2) }}
+          {% endif %}
+        attributes:
+          source: >-
+            {% set valid =
+              state_attr(
+                'sensor.se_nf_night_consumption_7d_dynamic',
+                'valid'
+              ) | default(false, true)
+            %}
+            {{ 'dynamic_median_7_nights' if valid else 'manual_fallback' }}
+          dynamic_valid: >-
+            {{
+              state_attr(
+                'sensor.se_nf_night_consumption_7d_dynamic',
+                'valid'
+              ) | default(false, true)
+            }}
+          valid_nights: >-
+            {{
+              state_attr(
+                'sensor.se_nf_night_consumption_7d_dynamic',
+                'valid_nights'
+              )
+            }}
+          window_start: >-
+            {{
+              state_attr(
+                'sensor.se_nf_night_consumption_7d_dynamic',
+                'window_start'
+              )
+            }}
+          window_end: >-
+            {{
+              state_attr(
+                'sensor.se_nf_night_consumption_7d_dynamic',
+                'window_end'
+              )
+            }}
+      - name: "SE NF Load Coverage Lead Minutes"
+        unique_id: se_nf_load_coverage_lead_minutes
+        unit_of_measurement: "min"
+        icon: mdi:clock-fast
+        state: >-
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set cov = states('sensor.se_nf_coverage_ratio') | float(0) %}
+          {% set maxlead = states('input_number.se_nf_coverage_lead_max_min') | int(120) %}
+          {% if need <= 0.05 or maxlead <= 0 %}
+            0
+          {% elif cov < 0.50 %}
+            {{ maxlead }}
+          {% elif cov < 0.80 %}
+            {{ [90, maxlead] | min }}
+          {% elif cov < 1.00 %}
+            {{ [60, maxlead] | min }}
+          {% elif cov < 1.25 %}
+            {{ [30, maxlead] | min }}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          coverage_ratio: "{{ states('sensor.se_nf_coverage_ratio') }}"
+          available_pv_for_battery_today: "{{ states('sensor.se_nf_available_pv_for_battery_today') }}"
+          needed_energy: "{{ states('sensor.se_nf_needed_energy') }}"
+          note: "V2.8.9a: Vorzug nur vor OPEN; nach OPEN wird nicht neu geschlossen."
+      - name: "SE NF Mode Latest Finish Hour"
+        unique_id: se_nf_mode_latest_finish_hour
+        icon: mdi:clock-end
+        unit_of_measurement: "h"
+        state: >-
+          {% if is_state('sensor.se_nf_planning_profile_effective','Akku schonen') %}
+            {{ states('input_number.se_nf_lifetime_latest_finish_hour') | float(18.5) | round(2) }}
+          {% else %}
+            {{ states('input_number.se_nf_latest_finish_hour') | float(17.5) | round(2) }}
+          {% endif %}
+      - name: "SE NF Mode Min Start Hour"
+        unique_id: se_nf_mode_min_start_hour
+        icon: mdi:clock-start
+        unit_of_measurement: "h"
+        state: >-
+          {% if is_state('sensor.se_nf_planning_profile_effective','Akku schonen') %}
+            {{ states('input_number.se_nf_lifetime_min_start_hour') | float(14.25) | round(2) }}
+          {% else %}
+            {{ states('input_number.se_nf_min_start_hour') | float(11.75) | round(2) }}
+          {% endif %}
+      - name: "SE NF Mode Start Safety Buffer Min"
+        unique_id: se_nf_mode_start_safety_buffer_min
+        icon: mdi:clock-alert-outline
+        unit_of_measurement: "min"
+        state: >-
+          {% if is_state('sensor.se_nf_planning_profile_effective','Akku schonen') %}
+            {{ states('input_number.se_nf_lifetime_start_safety_buffer_min') | float(15) | round(0) }}
+          {% else %}
+            {{ states('input_number.se_nf_start_safety_buffer_min') | float(30) | round(0) }}
+          {% endif %}
+      - name: "SE NF Needed Energy"
+        unique_id: se_nf_needed_energy
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:battery-plus-outline
+        state: >-
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set soe = states('sensor.se_nf_battery_soe') | float(0) %}
+          {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+          {% set target = states('sensor.se_nf_effective_target_soc_pct') | float(states('input_number.se_nf_target_soc_pct') | float(0)) %}
+          {% set usable_soc = [soe - reserve, 0] | max %}
+          {% set target_soc_above_reserve = [target - reserve, 0] | max %}
+          {% if cap <= 0 %}
+            0
+          {% else %}
+            {% set missing_usable_soc = [target_soc_above_reserve - usable_soc, 0] | max %}
+            {{ (cap * missing_usable_soc / 100) | round(2) }}
+          {% endif %}
+        attributes:
+          logical_empty_soc_pct: "{{ states('sensor.se_nf_backup_reserve_pct') }}"
+          logical_usable_soc_pct: >-
+            {% set soe = states('sensor.se_nf_battery_soe') | float(0) %}
+            {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+            {{ [soe - reserve, 0] | max | round(1) }}
+          logical_usable_energy_kwh: >-
+            {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+            {% set soe = states('sensor.se_nf_battery_soe') | float(0) %}
+            {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+            {{ (cap * ([soe - reserve, 0] | max) / 100) | round(2) if cap > 0 else 0 }}
+          target_soc_pct: "{{ states('sensor.se_nf_effective_target_soc_pct') }}"
+          note: "V2.9.9a: Energie unterhalb der SolarEdge-Backup-Reserve wird nie als nutzbarer Akkuinhalt angerechnet."
+      - name: "SE NF Next Charge Window"
+        unique_id: se_nf_next_charge_window
+        icon: mdi:calendar-clock
+        state: >-
+          {% set now_ts = now().timestamp() | int(0) %}
+          {% set end_grace = states('sensor.se_nf_today_end_with_grace_timestamp') | int(0) %}
+          {% if end_grace > 0 and now_ts > end_grace %}
+            {{ states('sensor.se_nf_tomorrow_charge_window') }}
+          {% else %}
+            {{ states('sensor.se_nf_today_charge_window') }}
+          {% endif %}
+      - name: "SE NF Next Charge Window Day"
+        unique_id: se_nf_next_charge_window_day
+        icon: mdi:calendar-question
+        state: >-
+          {% set now_ts = now().timestamp() | int(0) %}
+          {% set end_grace = states('sensor.se_nf_today_end_with_grace_timestamp') | int(0) %}
+          {% if end_grace > 0 and now_ts > end_grace %}
+            tomorrow
+          {% else %}
+            today
+          {% endif %}
+      - name: "SE NF Required Charge Minutes"
+        unique_id: se_nf_required_charge_minutes
+        unit_of_measurement: "min"
+        icon: mdi:timer-plus
+        state: >-
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set power = states('input_number.se_nf_planning_charge_power_w') | float(3500) %}
+          {% if need <= 0.05 or power <= 0 %}
+            0
+          {% else %}
+            {{ (((need / (power / 1000)) * 60) | round(0, 'ceil') | int(0)) }}
+          {% endif %}
+      - name: "SE NF Reserve Guard Consumption Until Start"
+        unique_id: se_nf_reserve_guard_consumption_until_start
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:home-clock-outline
+        state: >-
+          {% set now_ts = as_timestamp(now(), 0) | int(0) %}
+          {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set midnight_ts = (as_timestamp(today_at('23:59:59'), 0) | int(0)) + 1 %}
+          {% set horizon_s = [start_ts - now_ts, 0] | max %}
+          {% set remaining_day_s = [midnight_ts - now_ts, 900] | max %}
+          {% set remaining_load = states('sensor.se_nf_remaining_consumption_today') | float(0) %}
+          {% set buffer = 1 + (states('input_number.se_nf_lifetime_soc_buffer_pct') | float(0) / 100) %}
+          {% set fraction = [[horizon_s / remaining_day_s, 0] | max, 1] | min %}
+          {{ (remaining_load * fraction * buffer) | round(2) }}
+        attributes:
+          planned_start_timestamp: "{{ states('sensor.se_nf_active_planned_start_timestamp') | int(0) }}"
+          horizon_minutes: >-
+            {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+            {{ ([start_ts - (as_timestamp(now(), 0) | int(0)), 0] | max / 60) | round(0) }}
+          remaining_consumption_today_kwh: "{{ states('sensor.se_nf_remaining_consumption_today') }}"
+          consumption_buffer_pct: "{{ states('input_number.se_nf_lifetime_soc_buffer_pct') }}"
+          method: "zeitanteilig bis Start × Verbrauchspuffer"
+      - name: "SE NF Reserve Guard Forecast Status"
+        unique_id: se_nf_reserve_guard_forecast_status
+        icon: mdi:shield-clock-outline
+        state: >-
+          {% set mode = states('sensor.se_nf_planning_profile_effective') %}
+          {% set cfg = is_state('sensor.se_nf_config_check', 'ok') %}
+          {% set sanity = is_state('sensor.se_nf_sanity_check', 'ok') %}
+          {% set now_ts = as_timestamp(now(), 0) | int(0) %}
+          {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set projected = states('sensor.se_nf_reserve_guard_projected_soc_at_start') | float(100) %}
+          {% set guard = states('sensor.se_nf_reserve_guard_soc') | float(0) %}
+          {% if mode != 'Akku schonen' or not cfg or not sanity or need <= 0.05 or start_ts <= now_ts %}
+            inactive
+          {% elif projected <= guard %}
+            risk
+          {% else %}
+            safe
+          {% endif %}
+        attributes:
+          projected_soc_at_start_pct: "{{ states('sensor.se_nf_reserve_guard_projected_soc_at_start') }}"
+          guard_soc_pct: "{{ states('sensor.se_nf_reserve_guard_soc') }}"
+          planned_start_timestamp: "{{ states('sensor.se_nf_active_planned_start_timestamp') | int(0) }}"
+          planned_start_local: >-
+            {% set ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+            {{ ts | timestamp_custom('%Y-%m-%d %H:%M:%S', true) if ts > 0 else 'unbekannt' }}
+          note: "risk bedeutet: Der Akku würde nach konservativer Hochrechnung bis zum geplanten Start auf oder unter Backup-Reserve plus Akku-Puffer
+            fallen."
+      - name: "SE NF Reserve Guard Forecast Summary"
+        unique_id: se_nf_reserve_guard_forecast_summary
+        icon: mdi:shield-search
+        state: >-
+          {% set status = states('sensor.se_nf_reserve_guard_forecast_status') %}
+          {% set projected = states('sensor.se_nf_reserve_guard_projected_soc_at_start') %}
+          {% set guard = states('sensor.se_nf_reserve_guard_soc') %}
+          {% set load = states('sensor.se_nf_reserve_guard_consumption_until_start') %}
+          {% set pv = states('sensor.se_nf_reserve_guard_pv_credit_until_start') %}
+          {% set ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set start = ts | timestamp_custom('%H:%M', true) if ts > 0 else 'unbekannt' %}
+          {{ status }} · Prognose Start {{ start }}: {{ projected }} % · Guard {{ guard }} % · Verbrauch {{ load }} kWh · PV-Anrechnung {{ pv
+          }} kWh
+      - name: "SE NF Reserve Guard Projected SoC At Start"
+        unique_id: se_nf_reserve_guard_projected_soc_at_start
+        unit_of_measurement: "%"
+        icon: mdi:battery-clock-outline
+        state: >-
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set soe = states('sensor.se_nf_battery_soe') | float(0) %}
+          {% set load = states('sensor.se_nf_reserve_guard_consumption_until_start') | float(0) %}
+          {% set pv = states('sensor.se_nf_reserve_guard_pv_credit_until_start') | float(0) %}
+          {% set net_drain = [load - pv, 0] | max %}
+          {% set projected = soe - ((net_drain / cap) * 100) if cap > 0 else soe %}
+          {{ [[projected, 0] | max, 100] | min | round(1) }}
+        attributes:
+          current_soc_pct: "{{ states('sensor.se_nf_battery_soe') }}"
+          reserve_guard_soc_pct: "{{ states('sensor.se_nf_reserve_guard_soc') }}"
+          consumption_until_start_kwh: "{{ states('sensor.se_nf_reserve_guard_consumption_until_start') }}"
+          pv_credit_until_start_kwh: "{{ states('sensor.se_nf_reserve_guard_pv_credit_until_start') }}"
+          expected_net_battery_drain_kwh: >-
+            {% set load = states('sensor.se_nf_reserve_guard_consumption_until_start') | float(0) %}
+            {% set pv = states('sensor.se_nf_reserve_guard_pv_credit_until_start') | float(0) %}
+            {{ [load - pv, 0] | max | round(2) }}
+      - name: "SE NF Reserve Guard PV Credit Until Start"
+        unique_id: se_nf_reserve_guard_pv_credit_until_start
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:solar-power-variant-outline
+        state: >-
+          {% set now_ts = as_timestamp(now(), 0) | int(0) %}
+          {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+          {% set horizon_s = [start_ts - now_ts, 0] | max %}
+          {% set pv_horizon_s = [end_ts - now_ts, horizon_s, 900] | max %}
+          {% set remaining_pv = states('sensor.se_nf_remaining_pv_today_weather_adjusted') | float(0) %}
+          {% set ratio_raw = states('sensor.se_nf_live_pv_forecast_ratio_now') | float(0) %}
+          {% set ratio = [[ratio_raw, 0] | max, 1] | min %}
+          {% set actual_pv_w = [states('sensor.se_nf_live_pv_actual_now') | float(0), 0] | max %}
+          {% set fraction = [[horizon_s / pv_horizon_s, 0] | max, 1] | min %}
+          {% set forecast_credit = remaining_pv * fraction * 0.50 * ratio %}
+          {% set live_cap = (actual_pv_w / 1000) * (horizon_s / 3600) * 0.75 %}
+          {% if horizon_s <= 0 or actual_pv_w < 100 %}
+            0
+          {% else %}
+            {{ [forecast_credit, live_cap] | min | round(2) }}
+          {% endif %}
+        attributes:
+          remaining_pv_weather_adjusted_kwh: "{{ states('sensor.se_nf_remaining_pv_today_weather_adjusted') }}"
+          live_pv_actual_w: "{{ states('sensor.se_nf_live_pv_actual_now') }}"
+          live_forecast_ratio: "{{ states('sensor.se_nf_live_pv_forecast_ratio_now') }}"
+          forecast_credit_factor_pct: 50
+          live_extrapolation_cap_pct: 75
+          note: "Nur konservativ anrechenbare PV bis zum Start; PV-Überschuss erhöht den prognostizierten SoC nicht, sondern reduziert nur den
+            erwarteten Verbrauch aus dem Akku."
+      - name: "SE NF Reserve Guard SoC"
+        unique_id: se_nf_reserve_guard_soc
+        unit_of_measurement: "%"
+        icon: mdi:shield-battery
+        state: >-
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+          {% set low = states('input_number.se_nf_low_soc_floor_pct') | float(0) %}
+          {% set safety = states('input_number.se_nf_lifetime_safety_kwh') | float(1.0) %}
+          {% set dynamic = reserve + ((safety / cap) * 100) if cap > 0 else reserve %}
+          {{ [low, dynamic] | max | round(2) }}
+        attributes:
+          backup_reserve_pct: "{{ states('sensor.se_nf_backup_reserve_pct') }}"
+          battery_safety_buffer_kwh: "{{ states('input_number.se_nf_lifetime_safety_kwh') }}"
+          low_soc_floor_pct: "{{ states('input_number.se_nf_low_soc_floor_pct') }}"
+          note: "V2.9.9b: Backup-Reserve plus Akku-Puffer; Energie darunter gilt als nicht verfügbar."
+      - name: "SE NF Today Charge Window"
+        unique_id: se_nf_today_charge_window
+        icon: mdi:calendar-today
+        state: >-
+          {% set profile = states('sensor.se_nf_planning_profile_effective') %}
+          {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set avail_now = states('sensor.se_nf_available_pv_for_battery_today') | float(0) %}
+          {% set projected_buffer = states('sensor.se_nf_grid_projected_pv_buffer_at_start') | float(0) %}
+          {% set grid_status = states('sensor.se_nf_grid_planning_status') %}
+          {% set missing_min = states('sensor.se_nf_grid_window_missing_minutes') | int(0) %}
+          {% set missing_kwh = states('sensor.se_nf_grid_missing_charge_energy') | float(0) %}
+          {% set valid = start_ts > 0 and end_ts > 0 and start_ts < end_ts %}
+          {% if need <= 0.05 %}
+            Heute keine Ladung nötig · Ziel erreicht
+          {% elif not valid %}
+            Heute kein gültiges Ladefenster · Start und Ende prüfen
+          {% elif profile == 'Netzdienlich laden' %}
+            {% if grid_status == 'infeasible_energy' %}
+              {% set status_text = 'Fenster zu kurz · fehlen ' ~ missing_min ~ ' min / ' ~ missing_kwh ~ ' kWh' %}
+            {% elif grid_status == 'feasible_reduced_margin' %}
+              {% set status_text = 'Fenster reicht rechnerisch · Sicherheitsreserve reduziert' %}
+            {% else %}
+              {% set status_text = 'Spitzenfenster plausibel' %}
+            {% endif %}
+            Heute · {{ start_ts | timestamp_custom('%H:%M', true) }}–{{ end_ts | timestamp_custom('%H:%M', true) }} · Bedarf {{ need }} kWh · PV-Puffer am Start konservativ {{ projected_buffer }} kWh · {{ status_text }} · {{ states('sensor.se_nf_weather_planning_summary') }}
+          {% else %}
+            Heute · {{ start_ts | timestamp_custom('%H:%M', true) }}–{{ end_ts | timestamp_custom('%H:%M', true) }} · Bedarf {{ need }} kWh · PV-Puffer ab jetzt {{ (avail_now - need) | round(2) }} kWh · Verbrauchs-Vorzug {{ states('sensor.se_nf_load_coverage_lead_minutes') }} min · {{ states('sensor.se_nf_weather_planning_summary') }}
+          {% endif %}
+        attributes:
+          window_valid: >-
+            {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+            {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+            {{ start_ts > 0 and end_ts > 0 and start_ts < end_ts }}
+          start_timestamp: "{{ states('sensor.se_nf_active_planned_start_timestamp') | int(0) }}"
+          end_timestamp: "{{ states('sensor.se_nf_today_end_timestamp') | int(0) }}"
+          selected_start_source: >-
+            {{ state_attr('sensor.se_nf_active_planned_start_timestamp', 'selected_source') }}
+          session_state: "{{ states('input_select.se_nf_session_state') }}"
+          planning_profile: "{{ states('sensor.se_nf_planning_profile_effective') }}"
+          current_pv_buffer_kwh: >-
+            {% set avail = states('sensor.se_nf_available_pv_for_battery_today') | float(0) %}
+            {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+            {{ (avail - need) | round(2) }}
+          projected_pv_buffer_at_start_kwh: "{{ states('sensor.se_nf_grid_projected_pv_buffer_at_start') }}"
+          grid_planning_status: "{{ states('sensor.se_nf_grid_planning_status') }}"
+          grid_window_missing_minutes: "{{ states('sensor.se_nf_grid_window_missing_minutes') }}"
+          grid_missing_charge_energy_kwh: "{{ states('sensor.se_nf_grid_missing_charge_energy') }}"
+          grid_peak_center_timestamp: "{{ states('sensor.se_nf_grid_peak_center_timestamp') | int(0) }}"
+      - name: "SE NF Today End Timestamp"
+        unique_id: se_nf_today_end_timestamp
+        icon: mdi:clock-end
+        state: >-
+          {% set latest = states('sensor.se_nf_mode_latest_finish_hour') | float(17.5) %}
+          {% set h = latest | int(0) %}
+          {% set m = ((latest - h) * 60) | round(0) | int(0) %}
+          {{ as_timestamp(today_at('%02d:%02d:00' | format(h, m)), 0) | int(0) }}
+      - name: "SE NF Today End With Grace Timestamp"
+        unique_id: se_nf_today_end_with_grace_timestamp
+        icon: mdi:clock-end
+        state: >-
+          {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+          {% set grace = states('input_number.se_nf_session_end_grace_min') | int(30) %}
+          {{ end_ts + (grace * 60) if end_ts > 0 else 0 }}
+      - name: "SE NF Today Planned Start Candidate Timestamp"
+        unique_id: se_nf_today_planned_start_candidate_timestamp
+        icon: mdi:clock-start
+        state: >-
+          {% set profile = states('sensor.se_nf_planning_profile_effective') %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set grid_peak_start = states('sensor.se_nf_grid_peak_selected_start_timestamp') | int(0) %}
+          {% set end_ts = states('sensor.se_nf_today_end_timestamp') | int(0) %}
+          {% set req = states('sensor.se_nf_required_charge_minutes') | int(0) %}
+          {% set buffer = states('sensor.se_nf_mode_start_safety_buffer_min') | int(30) %}
+          {% set weather_lead = states('sensor.se_nf_weather_lead_minutes') | int(0) %}
+          {% set load_lead = states('sensor.se_nf_load_coverage_lead_minutes') | int(0) %}
+          {% set adaptive_lead = states('sensor.se_nf_adaptive_forecast_bias_minutes') | int(0) %}
+          {% set live_gap_lead = states('sensor.se_nf_live_forecast_gap_lead_minutes') | int(0) %}
+          {% set min_hour = states('sensor.se_nf_mode_min_start_hour') | float(11.75) %}
+          {% set min_h = min_hour | int(0) %}
+          {% set min_m = ((min_hour - min_h) * 60) | round(0) | int(0) %}
+          {% set min_ts = as_timestamp(today_at('%02d:%02d:00' | format(min_h, min_m)), 0) | int(0) %}
+          {% if need <= 0.05 or end_ts <= 0 %}
+            0
+          {% elif profile == 'Netzdienlich laden' and grid_peak_start > 0 %}
+            {{ grid_peak_start }}
+          {% else %}
+            {% set raw = end_ts - ((req + buffer + weather_lead + load_lead + adaptive_lead + live_gap_lead) * 60) %}
+            {{ [raw, min_ts] | max | int(0) }}
+          {% endif %}
+      - name: "SE NF Tomorrow Charge Window"
+        unique_id: se_nf_tomorrow_charge_window
+        icon: mdi:calendar-tomorrow
+        state: >-
+          {% set start_ts = states('sensor.se_nf_tomorrow_planned_start_timestamp') | int(0) %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set pv = states('sensor.se_nf_pv_forecast_tomorrow_weather_adjusted') | float(states('sensor.se_nf_pv_forecast_tomorrow') | float(0))
+          %}
+          {% set daily = states('input_number.se_nf_manual_daily_consumption_kwh') | float(8) %}
+          {% set avail = [pv - daily, 0] | max %}
+          {% set latest = states('sensor.se_nf_mode_latest_finish_hour') | float(17.5) %}
+          {% set h = latest | int(0) %}
+          {% set m = ((latest - h) * 60) | round(0) | int(0) %}
+          {% set end_ts = as_timestamp((today_at('%02d:%02d:00' | format(h, m)) + timedelta(days=1)), 0) | int(0) %}
+          {% if need <= 0.05 %}
+            Morgen aktuell keine Ladung nötig · Akku voll
+          {% elif start_ts <= 0 %}
+            Morgen kein gültiges Ladefenster
+          {% else %}
+            Morgen · {{ start_ts | timestamp_custom('%H:%M', true) }}–{{ end_ts | timestamp_custom('%H:%M', true) }} · Bedarf {{ need }} kWh ·
+          Wetter-PV {{ pv }} kWh · PV-Puffer {{ (avail - need) | round(2) }} kWh
+          {% endif %}
+      - name: "SE NF Tomorrow Planned Start Timestamp"
+        unique_id: se_nf_tomorrow_planned_start_timestamp
+        icon: mdi:clock-start
+        state: >-
+          {% set profile = states('sensor.se_nf_planning_profile_effective') %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set grid_peak_start = states('sensor.se_nf_grid_peak_selected_start_tomorrow_timestamp') | int(0) %}
+          {% set power = states('input_number.se_nf_planning_charge_power_w') | float(3500) %}
+          {% set req = ((need / (power / 1000)) * 60) | round(0, 'ceil') | int(0) if need > 0.05 and power > 0 else 0 %}
+          {% set buffer = states('sensor.se_nf_mode_start_safety_buffer_min') | int(30) %}
+          {% set weather_lead = states('sensor.se_nf_weather_lead_minutes_tomorrow') | int(0) %}
+          {% set latest = states('sensor.se_nf_mode_latest_finish_hour') | float(17.5) %}
+          {% set h = latest | int(0) %}
+          {% set m = ((latest - h) * 60) | round(0) | int(0) %}
+          {% set end_ts = as_timestamp((today_at('%02d:%02d:00' | format(h, m)) + timedelta(days=1)), 0) | int(0) %}
+          {% set min_hour = states('sensor.se_nf_mode_min_start_hour') | float(11.75) %}
+          {% set min_h = min_hour | int(0) %}
+          {% set min_m = ((min_hour - min_h) * 60) | round(0) | int(0) %}
+          {% set min_ts = as_timestamp((today_at('%02d:%02d:00' | format(min_h, min_m)) + timedelta(days=1)), 0) | int(0) %}
+          {% if need <= 0.05 or end_ts <= 0 %}
+            0
+          {% elif profile == 'Netzdienlich laden' and grid_peak_start > 0 %}
+            {{ grid_peak_start }}
+          {% else %}
+            {% set raw = end_ts - ((req + buffer + weather_lead) * 60) %}
+            {{ [raw, min_ts] | max | int(0) }}
+          {% endif %}

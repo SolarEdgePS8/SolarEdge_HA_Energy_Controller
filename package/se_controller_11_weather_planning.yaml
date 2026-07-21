@@ -1,0 +1,891 @@
+# SolarEdge Energy Controller v0.0.1 · Wetterplanung
+# Keine Modusentscheidung und keine SolarEdge-Writes.
+
+template:
+  - trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/30"
+      - platform: state
+        entity_id:
+          - input_text.se_nf_weather_entity
+          - input_boolean.se_nf_weather_planning_enabled
+    action:
+      - variables:
+          w_entity: >-
+            {% set cfg = states('input_text.se_nf_weather_entity') | trim %}
+            {% if cfg %}
+              {{ cfg }}
+            {% else %}
+              {% set ws = states.weather | list %}
+              {% if ws | count > 0 %}
+                {{ ws[0].entity_id }}
+              {% else %}
+                unknown
+              {% endif %}
+            {% endif %}
+      - if:
+          - condition: template
+            value_template: "{{ w_entity not in ['unknown','unavailable','none',''] and w_entity.startswith('weather.') }}"
+        then:
+          - service: weather.get_forecasts
+            target:
+              entity_id: "{{ w_entity }}"
+            data:
+              type: hourly
+            response_variable: se_nf_weather_hourly
+        else:
+          - variables:
+              se_nf_weather_hourly: {}
+    sensor:
+      - name: "SE NF Weather Factor Today Morning"
+        unique_id: se_nf_weather_factor_today_morning
+        icon: mdi:weather-sunset-up
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = now().strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 6 and h <= 10 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "today_06_10"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+      - name: "SE NF Weather Factor Today Midday"
+        unique_id: se_nf_weather_factor_today_midday
+        icon: mdi:weather-sunny
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = now().strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 11 and h <= 14 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "today_11_14"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+      - name: "SE NF Weather Factor Today Afternoon"
+        unique_id: se_nf_weather_factor_today_afternoon
+        icon: mdi:weather-sunset-down
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = now().strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 15 and h <= 18 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "today_15_18"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+      - name: "SE NF Weather Factor Tomorrow Morning"
+        unique_id: se_nf_weather_factor_tomorrow_morning
+        icon: mdi:weather-sunset-up
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 6 and h <= 10 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "tomorrow_06_10"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+      - name: "SE NF Weather Factor Tomorrow Midday"
+        unique_id: se_nf_weather_factor_tomorrow_midday
+        icon: mdi:weather-sunny
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 11 and h <= 14 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "tomorrow_11_14"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+      - name: "SE NF Weather Factor Tomorrow Afternoon"
+        unique_id: se_nf_weather_factor_tomorrow_afternoon
+        icon: mdi:weather-sunset-down
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set ent = w_entity | trim %}
+            {% set fc = se_nf_weather_hourly.get(ent, {}).get('forecast', []) if se_nf_weather_hourly is defined else [] %}
+            {% set target_day = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+            {% set ns = namespace(sum=0, cnt=0) %}
+
+            {% for item in fc %}
+              {% set ts = as_timestamp(item.datetime | default('', true), 0) | int(0) %}
+              {% if ts > 0 %}
+                {% set d = ts | timestamp_custom('%Y-%m-%d', true) %}
+                {% set h = ts | timestamp_custom('%H', true) | int(0) %}
+
+                {% if d == target_day and h >= 15 and h <= 18 %}
+                  {% set cond = item.condition | default('', true) | lower %}
+
+                  {% if item.cloud_coverage is defined and item.cloud_coverage is not none %}
+                    {% set cloud = item.cloud_coverage | float(0) %}
+                    {% if cloud <= 20 %}
+                      {% set cf = 1.00 %}
+                    {% elif cloud <= 50 %}
+                      {% set cf = 0.92 %}
+                    {% elif cloud <= 75 %}
+                      {% set cf = 0.82 %}
+                    {% else %}
+                      {% set cf = 0.68 %}
+                    {% endif %}
+                  {% else %}
+                    {% if cond in ['sunny', 'clear-night'] or 'sonnig' in cond or 'klar' in cond %}
+                      {% set cf = 1.00 %}
+                    {% elif cond in ['partlycloudy', 'partly-cloudy'] or 'partly' in cond or 'heiter' in cond or 'leicht' in cond %}
+                      {% set cf = 0.90 %}
+                    {% elif cond in ['cloudy'] or 'cloud' in cond or 'bewölkt' in cond or 'bedeckt' in cond or 'overcast' in cond %}
+                      {% set cf = 0.75 %}
+                    {% elif cond in ['fog'] or 'fog' in cond or 'nebel' in cond %}
+                      {% set cf = 0.70 %}
+                    {% elif cond in ['rainy', 'pouring'] or 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set cf = 0.62 %}
+                    {% elif cond in ['lightning', 'lightning-rainy'] or 'thunder' in cond or 'gewitter' in cond %}
+                      {% set cf = 0.55 %}
+                    {% elif cond in ['snowy', 'snowy-rainy'] or 'snow' in cond or 'schnee' in cond %}
+                      {% set cf = 0.60 %}
+                    {% else %}
+                      {% set cf = states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if item.precipitation_probability is defined and item.precipitation_probability is not none %}
+                    {% set p = item.precipitation_probability | float(0) %}
+                    {% if p < 20 %}
+                      {% set rf = 1.00 %}
+                    {% elif p < 40 %}
+                      {% set rf = 0.94 %}
+                    {% elif p < 60 %}
+                      {% set rf = 0.84 %}
+                    {% elif p < 80 %}
+                      {% set rf = 0.74 %}
+                    {% else %}
+                      {% set rf = 0.64 %}
+                    {% endif %}
+                  {% else %}
+                    {% set precip = item.precipitation | default(0) | float(0) %}
+                    {% if precip > 1.0 %}
+                      {% set rf = 0.68 %}
+                    {% elif precip > 0.2 %}
+                      {% set rf = 0.82 %}
+                    {% elif 'rain' in cond or 'regen' in cond or 'schauer' in cond %}
+                      {% set rf = 0.76 %}
+                    {% elif 'thunder' in cond or 'gewitter' in cond or 'lightning' in cond %}
+                      {% set rf = 0.62 %}
+                    {% else %}
+                      {% set rf = 1.00 %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set factor = ((cf * 0.70) + (rf * 0.30)) %}
+                  {% set ns.sum = ns.sum + factor %}
+                  {% set ns.cnt = ns.cnt + 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% if ns.cnt > 0 %}
+              {{ [[ns.sum / ns.cnt, 0.55] | max, 1.00] | min | round(2) }}
+            {% else %}
+              {# Kein Stundenforecast passend gefunden:
+                 nicht mehr blind 1.00, sondern current condition oder konservativer Fallback. #}
+              {% set curr = states(ent) | lower %}
+              {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+                1.00
+              {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+                0.90
+              {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+                0.75
+              {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+                0.70
+              {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+                0.62
+              {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+                0.55
+              {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+                0.60
+              {% else %}
+                {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          period: "tomorrow_15_18"
+          note: "hourly forecast preferred; current weather/fallback if no matching hourly samples"
+  - sensor:
+      - name: "SE NF PV Forecast Tomorrow Weather Adjusted"
+        unique_id: se_nf_pv_forecast_tomorrow_weather_adjusted
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:weather-sunny-alert
+        state: >-
+          {% set pv = states('sensor.se_nf_pv_forecast_tomorrow') | float(0) %}
+          {% set f = states('sensor.se_nf_weather_planning_factor_tomorrow') | float(1) %}
+          {{ [pv * f, 0] | max | round(2) }}
+      - name: "SE NF Remaining PV Today Weather Adjusted"
+        unique_id: se_nf_remaining_pv_today_weather_adjusted
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:weather-sunny-alert
+        state: >-
+          {% set pv = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+          {% set f = states('sensor.se_nf_weather_planning_factor_today') | float(1) %}
+          {{ [pv * f, 0] | max | round(2) }}
+      - name: "SE NF Weather Current Factor"
+        unique_id: se_nf_weather_current_factor
+        icon: mdi:weather-cloudy
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set src = states('sensor.se_nf_weather_entity_resolved') %}
+            {% set curr = states(src) | lower if src not in ['unknown','unavailable','none',''] else 'unknown' %}
+            {% if curr in ['sunny', 'clear-night'] or 'sonnig' in curr or 'klar' in curr %}
+              1.00
+            {% elif curr in ['partlycloudy', 'partly-cloudy'] or 'partly' in curr or 'heiter' in curr or 'leicht' in curr %}
+              0.90
+            {% elif curr in ['cloudy'] or 'cloud' in curr or 'bewölkt' in curr or 'bedeckt' in curr or 'overcast' in curr %}
+              0.75
+            {% elif curr in ['fog'] or 'fog' in curr or 'nebel' in curr %}
+              0.70
+            {% elif curr in ['rainy', 'pouring'] or 'rain' in curr or 'regen' in curr or 'schauer' in curr %}
+              0.62
+            {% elif curr in ['lightning', 'lightning-rainy'] or 'thunder' in curr or 'gewitter' in curr %}
+              0.55
+            {% elif curr in ['snowy', 'snowy-rainy'] or 'snow' in curr or 'schnee' in curr %}
+              0.60
+            {% else %}
+              {{ states('input_number.se_nf_weather_missing_forecast_factor') | float(0.85) | round(2) }}
+            {% endif %}
+          {% endif %}
+        attributes:
+          weather_entity: "{{ states('sensor.se_nf_weather_entity_resolved') }}"
+          weather_state: >-
+            {% set src = states('sensor.se_nf_weather_entity_resolved') %}
+            {{ states(src) if src not in ['unknown','unavailable','none',''] else 'unknown' }}
+      - name: "SE NF Weather Lead Minutes"
+        unique_id: se_nf_weather_lead_minutes
+        unit_of_measurement: "min"
+        icon: mdi:weather-cloudy-clock
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            0
+          {% else %}
+            {% set final = states('sensor.se_nf_weather_planning_factor_today') | float(1) %}
+            {% set mid = states('sensor.se_nf_weather_factor_today_midday') | float(1) %}
+            {% set aft = states('sensor.se_nf_weather_factor_today_afternoon') | float(1) %}
+            {% set curr = states('sensor.se_nf_weather_current_factor') | float(1) %}
+            {% set maxlead = states('input_number.se_nf_weather_max_lead_min') | int(90) %}
+
+            {# V2.9.4c: Startzeit-Vorzug nutzt finalen Wetter-Planungsfaktor #}
+            {% if aft < 0.70 or curr < 0.65 or final < 0.68 %}
+              {{ maxlead }}
+            {% elif final < 0.78 %}
+              {{ [60, maxlead] | min }}
+            {% elif final < 0.84 %}
+              {{ [45, maxlead] | min }}
+            {% elif final < 0.90 %}
+              {{ [30, maxlead] | min }}
+            {% else %}
+              0
+            {% endif %}
+          {% endif %}
+      - name: "SE NF Weather Lead Minutes Tomorrow"
+        unique_id: se_nf_weather_lead_minutes_tomorrow
+        unit_of_measurement: "min"
+        icon: mdi:weather-cloudy-clock
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            0
+          {% else %}
+            {% set mid = states('sensor.se_nf_weather_factor_tomorrow_midday') | float(1) %}
+            {% set aft = states('sensor.se_nf_weather_factor_tomorrow_afternoon') | float(1) %}
+            {% set maxlead = states('input_number.se_nf_weather_max_lead_min') | int(90) %}
+            {% if aft < 0.70 %}
+              {{ maxlead }}
+            {% elif aft < 0.80 %}
+              {{ [60, maxlead] | min }}
+            {% elif mid < 0.75 %}
+              {{ [45, maxlead] | min }}
+            {% elif mid < 0.85 or aft < 0.88 %}
+              {{ [30, maxlead] | min }}
+            {% else %}
+              0
+            {% endif %}
+          {% endif %}
+      - name: "SE NF Weather Planning Factor Today"
+        unique_id: se_nf_weather_planning_factor_today
+        icon: mdi:weather-partly-cloudy
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set h = now().hour + (now().minute / 60) %}
+            {% set m = states('sensor.se_nf_weather_factor_today_morning') | float(1) %}
+            {% set d = states('sensor.se_nf_weather_factor_today_midday') | float(1) %}
+            {% set a = states('sensor.se_nf_weather_factor_today_afternoon') | float(1) %}
+            {% set curr = states('sensor.se_nf_weather_current_factor') | float(1) %}
+            {% set w = states('input_number.se_nf_weather_current_weight_pct') | float(40) / 100 %}
+
+            {% if h < 10 %}
+              {% set base = ((m * 0.20) + (d * 0.35) + (a * 0.45)) %}
+            {% elif h < 14 %}
+              {% set base = ((d * 0.45) + (a * 0.55)) %}
+            {% elif h < 19 %}
+              {% set base = a %}
+            {% else %}
+              {% set base = 1.00 %}
+            {% endif %}
+
+            {# Current Weather Cap:
+               Aktueller Zustand darf Prognose nicht verbessern.
+               Wenn die konfigurierte Weather-Entity cloudy ist, wird aus 1.00 nicht mehr 1.00,
+               sondern konservativ reduziert.
+            #}
+            {% set blended = (base * (1 - w)) + (curr * w) %}
+            {% set final = [base, blended] | min %}
+            {{ [[final, 0.55] | max, 1.00] | min | round(2) }}
+          {% endif %}
+      - name: "SE NF Weather Planning Factor Tomorrow"
+        unique_id: se_nf_weather_planning_factor_tomorrow
+        icon: mdi:weather-partly-cloudy
+        state: >-
+          {% if is_state('input_boolean.se_nf_weather_planning_enabled','off') %}
+            1.00
+          {% else %}
+            {% set m = states('sensor.se_nf_weather_factor_tomorrow_morning') | float(1) %}
+            {% set d = states('sensor.se_nf_weather_factor_tomorrow_midday') | float(1) %}
+            {% set a = states('sensor.se_nf_weather_factor_tomorrow_afternoon') | float(1) %}
+            {{ ((m * 0.20) + (d * 0.35) + (a * 0.45)) | round(2) }}
+          {% endif %}
+      - name: "SE NF Weather Planning Summary"
+        unique_id: se_nf_weather_planning_summary
+        icon: mdi:weather-partly-cloudy
+        state: >-
+          {% set src = states('sensor.se_nf_weather_entity_resolved') %}
+          {% set curr_state = states(src) if src not in ['unknown','unavailable','none',''] else 'unknown' %}
+          {% set curr_factor = states('sensor.se_nf_weather_current_factor') %}
+          {% set tm = states('sensor.se_nf_weather_factor_today_morning') %}
+          {% set td = states('sensor.se_nf_weather_factor_today_midday') %}
+          {% set ta = states('sensor.se_nf_weather_factor_today_afternoon') %}
+          {% set final = states('sensor.se_nf_weather_planning_factor_today') %}
+          {% set lead = states('sensor.se_nf_weather_lead_minutes') %}
+          Wetter {{ src }}={{ curr_state }} Faktor {{ curr_factor }} · früh {{ tm }} · mittag {{ td }} · nachmittag {{ ta }} · final {{ final
+          }} · Vorzug {{ lead }} min

@@ -1,0 +1,166 @@
+# SolarEdge Energy Controller v0.0.1 · Safety-Fakten
+# Safety ist modusunabhängig und überstimmt jeden Modus.
+
+template:
+  - sensor:
+      - name: "SE NF Charge Limit Age S"
+        unique_id: se_nf_charge_limit_age_s
+        unit_of_measurement: "s"
+        icon: mdi:timer-sand
+        state: >-
+          {% set e = states('input_text.se_nf_charge_limit_entity') | trim %}
+          {% if states[e] is defined and states(e) not in ['unknown','unavailable','none',''] %}
+            {% set stamp = states[e].last_reported if states[e].last_reported is defined else states[e].last_updated %}
+            {{ (now().timestamp() - as_timestamp(stamp, 0)) | int(999999) }}
+          {% else %}
+            999999
+          {% endif %}
+      - name: "SE NF Config Check"
+        unique_id: se_nf_config_check
+        icon: mdi:check-network-outline
+        state: >-
+          {% set site_confirmed = is_state('input_boolean.se_nf_site_config_confirmed', 'on') %}
+          {% set charge = states('input_text.se_nf_charge_limit_entity') | trim %}
+          {% set charge_expected = states('input_text.se_nf_charge_limit_entity') | trim %}
+          {% set pv_today = states('input_text.se_nf_pv_today_remaining_entity') | trim %}
+          {% set pv_tom = states('input_text.se_nf_pv_tomorrow_entity') | trim %}
+          {% set soe = states('input_text.se_nf_battery_soe_entity') | trim %}
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') %}
+          {% set soe_age = states('sensor.se_nf_soe_age_s') | int(0) %}
+          {% set limit_age = states('sensor.se_nf_charge_limit_age_s') | int(0) %}
+          {% set max_age = states('input_number.se_nf_max_sensor_age_s') | int(1800) %}
+          {% if not site_confirmed %}
+            site_config_not_confirmed
+          {% elif charge != charge_expected %}
+            charge_limit_entity_not_allowed
+          {% elif states(charge_expected) in ['unknown','unavailable','none',''] %}
+            charge_limit_entity_missing
+          {% elif not pv_today or states(pv_today) in ['unknown','unavailable','none',''] %}
+            pv_today_remaining_missing
+          {% elif not pv_tom or states(pv_tom) in ['unknown','unavailable','none',''] %}
+            pv_tomorrow_missing
+          {% elif not soe or states(soe) in ['unknown','unavailable','none',''] %}
+            battery_soe_missing
+          {% elif cap in ['unknown','unavailable','none',''] or (cap | float(0)) <= 0 %}
+            battery_capacity_missing
+          {% elif soe_age > max_age %}
+            battery_soe_stale
+          {% elif limit_age > max_age %}
+            charge_limit_stale
+          {% else %}
+            ok
+          {% endif %}
+        attributes:
+          charge_limit_expected: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          charge_limit_configured: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          soe_age_s: "{{ states('sensor.se_nf_soe_age_s') }}"
+          charge_limit_age_s: "{{ states('sensor.se_nf_charge_limit_age_s') }}"
+          max_age_s: "{{ states('input_number.se_nf_max_sensor_age_s') | int(1800) }}"
+      - name: "SE NF Sanity Check"
+        unique_id: se_nf_sanity_check
+        icon: mdi:shield-check-outline
+        state: >-
+          {% set cfg = states('sensor.se_nf_config_check') %}
+          {% set soe = states('sensor.se_nf_battery_soe') | float(-1) %}
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+          {% set lifetime_min = states('input_number.se_nf_lifetime_min_soc_pct') | float(45) %}
+          {% set lifetime_max = states('input_number.se_nf_lifetime_max_soc_pct') | float(85) %}
+          {% set limit = states('sensor.se_nf_charge_limit_actual') | float(-1) %}
+          {% if cfg != 'ok' %}
+            config_{{ cfg }}
+          {% elif soe < 0 or soe > 100 %}
+            soe_out_of_range
+          {% elif cap <= 0 %}
+            battery_capacity_invalid
+          {% elif lifetime_min > lifetime_max %}
+            lifetime_target_bounds_invalid
+          {% elif reserve > lifetime_max %}
+            lifetime_max_below_backup_reserve
+          {% elif limit < 0 or limit > 5000 %}
+            charge_limit_out_of_range
+          {% else %}
+            ok
+          {% endif %}
+      - name: "SE NF SoE Age S"
+        unique_id: se_nf_soe_age_s
+        unit_of_measurement: "s"
+        icon: mdi:timer-sand
+        state: >-
+          {% set e = states('input_text.se_nf_battery_soe_entity') | trim %}
+          {% if e and states[e] is defined and states(e) not in ['unknown','unavailable','none',''] %}
+            {% set stamp = states[e].last_reported if states[e].last_reported is defined else states[e].last_updated %}
+            {{ (now().timestamp() - as_timestamp(stamp, 0)) | int(999999) }}
+          {% else %}
+            999999
+          {% endif %}
+    binary_sensor:
+      - name: "SE NF Config OK"
+        unique_id: se_nf_config_ok
+        icon: mdi:check-circle-outline
+        state: >-
+          {{ is_state('sensor.se_nf_config_check','ok') }}
+      - name: "SE NF EVCC Grid Charge Request"
+        unique_id: se_nf_evcc_grid_charge_request
+        delay_on:
+          minutes: 1
+        delay_off:
+          minutes: 12
+        icon: mdi:ev-station
+        state: >-
+          {% set mapping_bad = ['unknown','unavailable','none','None',''] %}
+          {% set inactive = ['unknown','unavailable','none','off','idle','normal','hold','unbekannt',''] %}
+          {% set evcc_e = states('input_text.se_nf_evcc_battery_mode_entity') | trim %}
+          {% set mode = states(evcc_e) | lower | trim if evcc_e not in mapping_bad else '' %}
+          {% set is_discharge = 'discharge' in mode or 'entladen' in mode %}
+          {% set is_charge = 'charge' in mode or 'laden' in mode %}
+          {{ mode not in inactive and is_charge and not is_discharge }}
+        attributes:
+          source_entity: >-
+            {{ states('input_text.se_nf_evcc_battery_mode_entity') | trim }}
+          raw_mode: >-
+            {% set e = states('input_text.se_nf_evcc_battery_mode_entity') | trim %}
+            {{ states(e) if e not in ['unknown','unavailable','none','None',''] else '' }}
+          mapping_status: >-
+            {% set mapping_bad = ['unknown','unavailable','none','None',''] %}
+            {% set inactive = ['unknown','unavailable','none','off','idle','normal','hold','unbekannt',''] %}
+            {% set e = states('input_text.se_nf_evcc_battery_mode_entity') | trim %}
+            {% set mode = states(e) | lower | trim if e not in mapping_bad else '' %}
+            {% set is_discharge = 'discharge' in mode or 'entladen' in mode %}
+            {% set is_charge = 'charge' in mode or 'laden' in mode %}
+            {% if e in mapping_bad or mode in inactive %}
+              optional_inactive
+            {% elif is_charge and not is_discharge %}
+              charge_request
+            {% elif is_discharge %}
+              discharge
+            {% else %}
+              unknown_mode
+            {% endif %}
+      - name: "SE NF Min Open Latch Active"
+        unique_id: se_nf_min_open_latch_active
+        icon: mdi:lock-open-variant-outline
+        state: >-
+          {{ states('input_select.se_nf_session_state') in ['open','battery_full_open','evcc_override','low_soc','risk'] }}
+      - name: "SE NF Risk Confirmed"
+        unique_id: se_nf_risk_confirmed
+        icon: mdi:alert-circle-check-outline
+        state: >-
+          {{ is_state('binary_sensor.se_nf_risk_flag','on') }}
+      - name: "SE NF Risk Flag"
+        unique_id: se_nf_risk_flag
+        icon: mdi:alert-outline
+        state: >-
+          {{ not is_state('sensor.se_nf_config_check','ok') or not is_state('sensor.se_nf_sanity_check','ok') or is_state('input_select.se_nf_session_state','risk')
+          }}
+      - name: "SE NF Sanity OK"
+        unique_id: se_nf_sanity_ok
+        icon: mdi:shield-check
+        state: >-
+          {{ is_state('sensor.se_nf_sanity_check','ok') }}
+      - name: "SE NF Write Lock Active"
+        unique_id: se_nf_write_lock_active
+        icon: mdi:lock-clock
+        state: >-
+          {% set until_ts = as_timestamp(states('input_datetime.se_nf_write_lock_until'), 0) | int(0) %}
+          {{ until_ts > (now().timestamp() | int(0)) }}

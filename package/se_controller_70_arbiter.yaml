@@ -1,0 +1,305 @@
+# SolarEdge Energy Controller v0.0.1 · Zentraler Arbiter
+# Genau eine öffentliche Zielentscheidung und genau ein Session-State-Owner.
+
+template:
+  - sensor:
+      - name: "SE NF Charge Limit Target"
+        unique_id: se_nf_charge_limit_target
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:target
+        state: "{{ states('sensor.se_nf_desired_target') | float(5000) | round(0) }}"
+      - name: "SE NF Decision Reason"
+        unique_id: se_nf_decision_reason
+        icon: mdi:text-box-search-outline
+        state: >-
+          {% set enabled = is_state('input_boolean.se_netzdienlich_enabled','on') %}
+          {% set cfg = states('sensor.se_nf_config_check') %}
+          {% set sanity = states('sensor.se_nf_sanity_check') %}
+          {% set s = states('input_select.se_nf_session_state') %}
+          {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
+          {% set start = start_ts | timestamp_custom('%H:%M', true) if start_ts > 0 else 'unbekannt' %}
+          {% if not enabled %}
+            Deaktiviert · Ladebegrenzung freigegeben (Fail-open)
+          {% elif cfg != 'ok' %}
+            Config {{ cfg }} · fail-open
+          {% elif sanity != 'ok' %}
+            Sanity {{ sanity }} · fail-open
+          {% elif s == 'closed' %}
+            Geschlossen · warte auf Planung
+          {% elif s == 'armed' %}
+            Geplant · Start {{ start }} · noch geschlossen
+          {% elif s == 'open' %}
+            Offen · Ladefreigabe aktiv
+          {% elif s == 'battery_full_open' %}
+            Akku voll · Freigabe bleibt offen
+          {% elif s == 'done' %}
+            {% set mode = states('sensor.se_nf_optimization_mode_effective') %}
+            {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+            {% if mode == 'Netzdienlich laden' and need > 0.05 %}
+              {% set status = states('sensor.se_nf_grid_planning_status') %}
+              {% set missing_min = states('sensor.se_nf_grid_window_missing_minutes') | int(0) %}
+              {% set missing_kwh = states('sensor.se_nf_grid_missing_charge_energy') | float(0) %}
+              {% if status == 'infeasible_energy' %}
+                Ziel nicht erreicht · Tagesfenster beendet · Restbedarf {{ need }} kWh · Fenster zu kurz: {{ missing_min }} min / {{ missing_kwh }} kWh fehlen
+              {% else %}
+                Ziel nicht erreicht · Tagesfenster beendet · Restbedarf {{ need }} kWh
+              {% endif %}
+            {% elif mode == 'Akku schonen' and need > 0.05 %}
+              Schon-Ziel nicht erreicht · Tagesfenster beendet · Restbedarf {{ need }} kWh
+            {% else %}
+              Erledigt · Tagesfenster beendet
+            {% endif %}
+          {% elif s == 'evcc_override' %}
+            EVCC Override · Freigabe aktiv
+          {% elif s == 'low_soc' %}
+            {% set fg = states('sensor.se_nf_reserve_guard_forecast_status') %}
+            {% if fg == 'risk' %}
+              Vorausschauender Reserve-Schutz · Prognose {{ states('sensor.se_nf_reserve_guard_projected_soc_at_start') }} % ≤ Guard {{ states('sensor.se_nf_reserve_guard_soc')
+          }} % · Laden bis {{ states('sensor.se_nf_effective_target_soc_pct') }} %
+            {% else %}
+              Reserve-Schutz · Laden bis {{ states('sensor.se_nf_effective_target_soc_pct') }} %
+            {% endif %}
+          {% elif s == 'risk' %}
+            Risk · fail-open
+          {% else %}
+            {{ s }}
+          {% endif %}
+        attributes:
+          full_reason: >-
+            {{ state_attr('sensor.se_nf_start_gate_reason', 'full_reason') | default(states('sensor.se_nf_start_gate_reason'), true) }}
+          window: "{{ states('sensor.se_nf_today_charge_window') }}"
+          weather: "{{ states('sensor.se_nf_weather_planning_summary') }}"
+          load_forecast: "{{ states('sensor.se_nf_load_forecast_summary') }}"
+          target_w: "{{ states('sensor.se_nf_desired_target') }}"
+          actual_w: "{{ states('sensor.se_nf_charge_limit_actual') }}"
+      - name: "SE NF Desired Target"
+        unique_id: se_nf_desired_target
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:file-sign
+        state: >-
+          {% set enabled = is_state('input_boolean.se_netzdienlich_enabled','on') %}
+
+          {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+
+          {% set config_ok = is_state('sensor.se_nf_config_check','ok') %}
+
+          {% set sanity_ok = is_state('sensor.se_nf_sanity_check','ok') %}
+
+          {% set session = states('input_select.se_nf_session_state') %}
+
+          {% set open_w = states('input_number.se_nf_open_charge_limit_w') | float(5000) %}
+
+          {% if not enabled or not config_ok or not sanity_ok or session in ['evcc_override','low_soc','risk'] %}
+            {{ open_w | round(0) }}
+          {% elif selected == 'Eigenverbrauch maximieren' %}
+            {{ states('sensor.se_controller_eigenverbrauch_charge_target') | float(open_w) | round(0) }}
+          {% elif selected == 'Akku schonen' %}
+            {{ states('sensor.se_controller_akku_schonen_charge_target') | float(0) | round(0) }}
+          {% elif selected == 'EVOpt optimiert' %}
+            {{ states('sensor.se_controller_evopt_charge_target') | float(states('sensor.se_controller_netzdienlich_charge_target') | float(0))
+          | round(0) }}
+          {% else %}
+            {{ states('sensor.se_controller_netzdienlich_charge_target') | float(0) | round(0) }}
+          {% endif %}
+        attributes:
+          selected_mode: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          active_control: "{{ states('sensor.se_nf_active_control_label') }}"
+          evopt_action: "{{ states('sensor.se_nf_evopt_action_stable') }}"
+          fallback_active: "{{ is_state('binary_sensor.se_nf_evopt_fallback_active','on') }}"
+      - name: "SE NF Effective Write Target"
+        unique_id: se_nf_effective_write_target
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:target-variant
+        state: "{{ states('sensor.se_nf_desired_target') | float(5000) | round(0) }}"
+      - name: "SE NF Phase"
+        unique_id: se_nf_phase
+        icon: mdi:state-machine
+        state: >-
+          {% set s = states('input_select.se_nf_session_state') %}
+          {% if s in ['closed','armed'] %}
+            hold_closed
+          {% elif s in ['open','battery_full_open'] %}
+            export_priority_open
+          {% elif s == 'done' %}
+            done
+          {% elif s == 'evcc_override' %}
+            evcc_override
+          {% elif s == 'low_soc' %}
+            low_soc
+          {% elif s == 'risk' %}
+            risk
+          {% else %}
+            {{ s }}
+          {% endif %}
+      - name: "SE NF Start Gate Reason"
+        unique_id: se_nf_start_gate_reason
+        icon: mdi:gate
+        state: >-
+          {% set s = states('input_select.se_nf_session_state') %}
+          {% if s == 'armed' %}
+            Start geplant
+          {% elif s == 'open' %}
+            Ladefenster offen
+          {% elif s == 'battery_full_open' %}
+            Akku voll · Ladefreigabe offen
+          {% elif s == 'closed' %}
+            Noch geschlossen
+          {% elif s == 'done' %}
+            {% set mode = states('sensor.se_nf_optimization_mode_effective') %}
+            {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+            {% if mode == 'Netzdienlich laden' and need > 0.05 %}
+              Ziel nicht erreicht
+            {% elif mode == 'Akku schonen' and need > 0.05 %}
+              Schon-Ziel nicht erreicht
+            {% else %}
+              Tagesfenster erledigt
+            {% endif %}
+          {% elif s == 'evcc_override' %}
+            EVCC-Ladefreigabe
+          {% elif s == 'low_soc' %}
+            Reserve-Schutz
+          {% elif s == 'risk' %}
+            Sicherheitsmodus
+          {% else %}
+            {{ s }}
+          {% endif %}
+        attributes:
+          schema: full_reason_long_v1
+          full_reason: >-
+            {% set s = states('input_select.se_nf_session_state') %}
+            {% if s == 'armed' %}
+              Start geplant · {{ states('sensor.se_nf_today_charge_window') }}
+            {% elif s == 'open' %}
+              Ladefenster offen
+            {% elif s == 'battery_full_open' %}
+              Akku voll · Ladefreigabe bleibt offen
+            {% elif s == 'closed' %}
+              Noch geschlossen · {{ states('sensor.se_nf_next_charge_window') }}
+            {% elif s == 'done' %}
+              {% set mode = states('sensor.se_nf_optimization_mode_effective') %}
+              {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+              {% if mode == 'Netzdienlich laden' and need > 0.05 %}
+                Tagesfenster beendet · Ziel nicht erreicht · Restbedarf {{ need }} kWh
+              {% elif mode == 'Akku schonen' and need > 0.05 %}
+                Schonfenster beendet · Ziel nicht erreicht · Restbedarf {{ need }} kWh
+              {% else %}
+                Tagesfenster erledigt
+              {% endif %}
+            {% elif s == 'evcc_override' %}
+              EVCC fordert Ladefreigabe
+            {% elif s == 'low_soc' %}
+              {% if states('sensor.se_nf_reserve_guard_forecast_status') == 'risk' %}
+                Vorausschauender Reserve-Schutz · Startprognose {{ states('sensor.se_nf_reserve_guard_projected_soc_at_start') }} % · Guard {{ states('sensor.se_nf_reserve_guard_soc') }} % · Ziel {{ states('sensor.se_nf_effective_target_soc_pct') }} %
+              {% else %}
+                Reserve-Schutz · Backup-Reserve ist logischer Nullpunkt · Ziel {{ states('sensor.se_nf_effective_target_soc_pct') }} %
+              {% endif %}
+            {% elif s == 'risk' %}
+              Sicherheitsmodus · fail-open
+            {% else %}
+              {{ s }}
+            {% endif %}
+          today_window: "{{ states('sensor.se_nf_today_charge_window') }}"
+          next_window: "{{ states('sensor.se_nf_next_charge_window') }}"
+          effective_mode: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          planned_start: "{{ states('sensor.se_nf_active_planned_start_timestamp') }}"
+      - name: "SE NF Status"
+        unique_id: se_nf_status
+        icon: mdi:list-status
+        state: >-
+          {{ states('input_select.se_nf_session_state') }} · {{ states('sensor.se_nf_active_control_label') }} · Ziel {{ states('sensor.se_nf_desired_target')
+          }} W
+      - name: "SE NF Writer Last Decision"
+        unique_id: se_nf_writer_last_decision
+        icon: mdi:comment-check-outline
+        state: >-
+          {% set mode = states('sensor.se_nf_writer_mode') %}
+          {% set target = states('sensor.se_nf_desired_target') | float(5000) | round(0) %}
+          {% set current = states('sensor.se_nf_charge_limit_actual') | float(0) | round(0) %}
+          {% if mode == 'idle' %}
+            Kein Write nötig · Soll {{ target }} W · Ist {{ current }} W
+          {% elif mode == 'priority_open' %}
+            Priority-Open · {{ target }} W darf Cooldown/Lock umgehen
+          {% elif mode == 'normal' %}
+            Normaler Write erlaubt · Soll {{ target }} W · Ist {{ current }} W
+          {% elif mode == 'blocked_lock' %}
+            Write blockiert · Write-Lock aktiv · Soll {{ target }} W · Ist {{ current }} W
+          {% elif mode == 'blocked_cooldown' %}
+            Write blockiert · Cooldown aktiv · Soll {{ target }} W · Ist {{ current }} W
+          {% elif mode == 'blocked_invalid' %}
+            Write blockiert · SolarEdge Charge-Limit nicht verfügbar
+          {% else %}
+            Writer-Modus {{ mode }} · Soll {{ target }} W · Ist {{ current }} W
+          {% endif %}
+      - name: "SE NF Writer Mode"
+        unique_id: se_nf_writer_mode
+        icon: mdi:pencil-ruler
+        state: >-
+          {% set target = states('sensor.se_nf_desired_target') | float(5000) %}
+          {% set current = states('sensor.se_nf_charge_limit_actual') | float(999999) %}
+          {% set delta = (target - current) | abs %}
+          {% set min_delta = states('input_number.se_nf_write_min_delta_w') | float(100) %}
+          {% set cooldown_s = states('input_number.se_nf_write_cooldown_s') | int(600) %}
+          {% set last_write_ts = as_timestamp(states('input_datetime.se_nf_last_write'), 0) | int(0) %}
+          {% set now_ts = now().timestamp() | int(0) %}
+          {% set cooldown_ok = (now_ts - last_write_ts) >= cooldown_s %}
+          {% set lock_active = is_state('binary_sensor.se_nf_write_lock_active','on') %}
+          {% if states(states('input_text.se_nf_charge_limit_entity') | trim) in ['unknown','unavailable','none',''] %}
+            blocked_invalid
+          {% elif delta < min_delta %}
+            idle
+          {% elif target >= 4750 %}
+            priority_open
+          {% elif lock_active %}
+            blocked_lock
+          {% elif not cooldown_ok %}
+            blocked_cooldown
+          {% else %}
+            normal
+          {% endif %}
+        attributes:
+          target_w: "{{ states('sensor.se_nf_desired_target') }}"
+          current_w: "{{ states('sensor.se_nf_charge_limit_actual') }}"
+          delta_w: >-
+            {% set target = states('sensor.se_nf_desired_target') | float(5000) %}
+            {% set current = states('sensor.se_nf_charge_limit_actual') | float(999999) %}
+            {{ (target - current) | abs | round(0) }}
+          priority_open: "{{ states('sensor.se_nf_desired_target') | float(0) >= 4750 }}"
+automation:
+  - id: se_nf_v28_session_manager
+    alias: 'SolarEdge Energy Controller: Session Manager'
+    mode: restart
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: /2
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - input_select.se_nf_optimization_mode
+          - sensor.se_controller_eigenverbrauch_next_session_state
+          - sensor.se_controller_netzdienlich_next_session_state
+          - sensor.se_controller_akku_schonen_next_session_state
+          - sensor.se_nf_config_check
+          - sensor.se_nf_sanity_check
+          - binary_sensor.se_nf_evcc_grid_charge_request
+    action:
+      - variables:
+          selected: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          next_state: "{% set selected = states('sensor.se_nf_optimization_mode_effective') %}\n{% if selected == 'Eigenverbrauch maximieren'
+            %}\n  {{ states('sensor.se_controller_eigenverbrauch_next_session_state') }}\n{% elif selected == 'Akku schonen' %}\n  {{ states('sensor.se_controller_akku_schonen_next_session_state')
+            }}\n{% else %}\n  {{ states('sensor.se_controller_netzdienlich_next_session_state') }}\n{% endif %}"
+      - condition: template
+        value_template: "{{ next_state | trim in ['closed','armed','open','battery_full_open','done','evcc_override','low_soc','risk'] and states('input_select.se_nf_session_state')
+          != next_state | trim }}"
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.se_nf_session_state
+        data:
+          option: '{{ next_state | trim }}'

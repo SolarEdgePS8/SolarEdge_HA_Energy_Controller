@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.zip
+*.tar.gz
+config/site_config.env
+config/private_migration_values.env
+*.log
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,636 @@
+# SolarEdge Energy Controller v0.0.1 · Core
+# Bestehende se_nf_* Entity-IDs bleiben absichtlich erhalten.
+
+input_boolean:
+  se_nf_site_config_confirmed:
+    name: "SolarEdge Energy Controller: Standortkonfiguration bestätigt"
+    icon: mdi:shield-check
+    initial: false
+  se_netzdienlich_enabled:
+    name: "SolarEdge Energy Controller: Master"
+    icon: mdi:transmission-tower
+    initial: false
+  se_netzdienlich_debug:
+    name: "SolarEdge: Netzdienlich V2.8 Debug"
+    icon: mdi:bug-outline
+  se_nf_weather_planning_enabled:
+    name: "Netzdienlich V2.8: Wetterplanung aktiv"
+    icon: mdi:weather-partly-cloudy
+  se_nf_lifetime_target_reached:
+    name: "Akku schonen: Ziel erreicht"
+    icon: mdi:battery-check
+  se_nf_adaptive_forecast_bias_enabled:
+    name: SE NF Adaptive Forecast Bias Enabled
+    icon: mdi:chart-bell-curve
+  se_nf_lifetime_latch_repair_enabled:
+    name: SE NF Lifetime Latch Repair Enabled
+    icon: mdi:battery-sync
+  se_nf_critical_deficit_latched_today:
+    name: "SE NF Critical Deficit Latched Today"
+    icon: mdi:lock-clock
+input_text:
+  se_nf_command_mode_grid_option:
+    name: "SolarEdge Controller: Command-Mode Netzladen Option optional"
+    icon: mdi:transmission-tower-import
+    max: 255
+  se_nf_command_mode_default_option:
+    name: "SolarEdge Controller: Command-Mode Standard Option optional"
+    icon: mdi:home-battery
+    max: 255
+  se_nf_charge_limit_entity:
+    name: "Netzdienlich: SolarEdge Charge-Limit Entity"
+    icon: mdi:lightning-bolt
+    max: 255
+  se_nf_pv_today_remaining_entity:
+    name: "Netzdienlich: PV-Prognose heute verbleibend Entity"
+    icon: mdi:solar-power
+    max: 255
+  se_nf_pv_today_total_entity:
+    name: "Netzdienlich: PV-Prognose heute gesamt Entity"
+    icon: mdi:solar-power-variant
+    max: 255
+  se_nf_pv_tomorrow_entity:
+    name: "Netzdienlich: PV-Prognose morgen Entity"
+    icon: mdi:weather-sunny
+    max: 255
+  se_nf_battery_soe_entity:
+    name: "Netzdienlich: Speicher SoE Entity"
+    icon: mdi:battery-heart
+    max: 255
+  se_nf_battery_capacity_entity:
+    name: "Netzdienlich: Speicher Kapazität Entity"
+    icon: mdi:battery
+    max: 255
+  se_nf_backup_reserve_entity:
+    name: "Netzdienlich: Backup Reserve Entity optional"
+    icon: mdi:battery-lock
+    max: 255
+  se_nf_weather_entity:
+    name: "Netzdienlich: Wetter Entity optional"
+    icon: mdi:weather-partly-cloudy
+    max: 255
+  se_nf_pv_actual_today_entity:
+    name: SE NF PV Ist Heute Entity
+    max: 255
+  se_nf_pv_overmorgen_entity:
+    name: SE NF PV Übermorgen Entity
+    max: 255
+  se_nf_evcc_battery_mode_entity:
+    name: "SE NF Entity: EVCC Battery Mode"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_daily_consumption_entity:
+    name: "SE NF Entity: Tagesverbrauch"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_live_pv_power_entities:
+    name: "SE NF Entities: Live PV Leistung"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_actual_pv_today_entities:
+    name: "SE NF Entities: PV Ist heute"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_forecast_now_entity:
+    name: "SE NF Entity: PV Prognose Leistung jetzt"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_pv_overmorrow_entities:
+    name: "SE NF Entities: PV Prognose übermorgen"
+    icon: mdi:link-variant
+    max: 255
+  se_nf_pv_actual_meter_source_entity:
+    name: "SE NF Entity: PV Energy Source for Utility Meter"
+    icon: mdi:solar-power-variant
+    max: 255
+  se_nf_sql_db_path:
+    name: "SE NF SQL: Recorder DB Path"
+    icon: mdi:database-cog
+    max: 255
+  se_nf_discharge_limit_entity:
+    name: "Netzdienlich: SolarEdge Discharge-Limit Entity optional"
+    icon: mdi:battery-arrow-down-outline
+    max: 255
+  se_nf_command_mode_entity:
+    name: "SolarEdge Controller: Storage Command-Mode Entity optional"
+    icon: mdi:tune-vertical
+    max: 255
+  se_nf_storage_control_mode_entity:
+    name: "SolarEdge Controller: Storage Control-Mode Entity optional"
+    icon: mdi:remote
+    max: 255
+  se_nf_storage_control_remote_option:
+    name: "SolarEdge Controller: Remote-Control Optionswert optional"
+    icon: mdi:format-list-bulleted
+    max: 255
+  se_nf_advanced_power_control_entity:
+    name: "SolarEdge Controller: Advanced-Power-Control Entity optional"
+    icon: mdi:transmission-tower-export
+    max: 255
+  se_nf_live_consumption_power_entities:
+    name: "SolarEdge Controller: Live-Verbrauchsleistung Entities"
+    icon: mdi:home-lightning-bolt-outline
+    max: 255
+  se_nf_external_ev_charging_entity:
+    name: "SolarEdge Controller: Externes EV-Laden Signal optional"
+    icon: mdi:ev-station
+    max: 255
+  se_nf_external_discharge_lock_entity:
+    name: "SolarEdge Controller: Externe Entladesperre optional"
+    icon: mdi:battery-lock
+    max: 255
+  se_nf_external_peak_lock_entity:
+    name: "SolarEdge Controller: Externer Peak-Lock optional"
+    icon: mdi:chart-bell-curve
+    max: 255
+input_number:
+  se_nf_closed_discharge_limit_w:
+    name: "SolarEdge Controller: Discharge-Limit gesperrt"
+    icon: mdi:battery-lock
+    min: 0
+    max: 5000
+    step: 50
+    mode: box
+    unit_of_measurement: "W"
+    initial: 0
+  se_nf_open_discharge_limit_w:
+    name: "SolarEdge Controller: Discharge-Limit freigegeben"
+    icon: mdi:battery-arrow-down
+    min: 0
+    max: 5000
+    step: 50
+    mode: box
+    unit_of_measurement: "W"
+    initial: 5000
+  se_nf_backup_reserve_fallback_pct:
+    name: "Netzdienlich: Backup-Reserve ohne Backup-System"
+    icon: mdi:battery-lock-open
+    min: 0
+    max: 100
+    step: 1
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_closed_charge_limit_w:
+    name: "Netzdienlich V2.8: Charge-Limit geschlossen"
+    icon: mdi:battery-off-outline
+    min: 0
+    max: 5000
+    step: 50
+    mode: box
+    unit_of_measurement: "W"
+  se_nf_open_charge_limit_w:
+    name: "Netzdienlich V2.8: Charge-Limit offen"
+    icon: mdi:battery-arrow-up
+    min: 0
+    max: 5000
+    step: 50
+    mode: box
+    unit_of_measurement: "W"
+  se_nf_battery_capacity_kwh_fallback:
+    name: "Netzdienlich V2.8: Speicher-Kapazität Fallback"
+    icon: mdi:battery
+    min: 0
+    max: 50
+    step: 0.05
+    mode: box
+    unit_of_measurement: "kWh"
+  se_nf_target_soc_pct:
+    name: "Netzdienlich laden: Ziel-Ladestand"
+    icon: mdi:battery-90
+    min: 50
+    max: 100
+    step: 0.5
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_lifetime_min_start_hour:
+    name: "Akku schonen: frühester Ladebeginn"
+    icon: mdi:clock-start
+    min: 10
+    max: 19
+    step: 0.25
+    mode: slider
+    unit_of_measurement: "h"
+  se_nf_lifetime_latest_finish_hour:
+    name: "Akku schonen: spätestens fertig"
+    icon: mdi:clock-end
+    min: 14
+    max: 22
+    step: 0.25
+    mode: slider
+    unit_of_measurement: "h"
+  se_nf_lifetime_start_safety_buffer_min:
+    name: "Akku schonen: Zeitpuffer vor Ende"
+    icon: mdi:clock-alert-outline
+    min: 0
+    max: 120
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_lifetime_min_soc_pct:
+    name: "Akku schonen: Mindest-Ladestand"
+    icon: mdi:battery-50
+    min: 20
+    max: 80
+    step: 0.5
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_lifetime_max_soc_pct:
+    name: "Akku schonen: maximaler Ladestand"
+    icon: mdi:battery-80
+    min: 50
+    max: 95
+    step: 0.5
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_lifetime_safety_kwh:
+    name: "Akku schonen: Reserve-Fallback bei fehlender Historie"
+    icon: mdi:shield-plus-outline
+    min: 0
+    max: 5
+    step: 0.1
+    mode: slider
+    unit_of_measurement: "kWh"
+  se_nf_lifetime_night_fallback_kwh:
+    name: "Akku schonen: Nachtbedarf wenn Prognose fehlt"
+    icon: mdi:weather-night
+    min: 1
+    max: 15
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kWh"
+  se_nf_low_soc_floor_pct:
+    name: "Netzdienlich V2.8: Low-SoC Schwelle"
+    icon: mdi:battery-alert
+    min: 0
+    max: 40
+    step: 0.5
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_manual_daily_consumption_kwh:
+    name: "Netzdienlich V2.8: Tagesverbrauch Fallback"
+    icon: mdi:home-lightning-bolt
+    min: 1
+    max: 60
+    step: 0.5
+    mode: box
+    unit_of_measurement: "kWh"
+  se_nf_max_sensor_age_s:
+    name: "Netzdienlich V2.8: Max. Sensoralter"
+    icon: mdi:timer-alert-outline
+    min: 1800
+    max: 28800
+    step: 600
+    mode: box
+    unit_of_measurement: "s"
+  se_nf_load_forecast_safety_factor:
+    name: "Netzdienlich V2.8: Verbrauchsprognose Sicherheitsfaktor"
+    icon: mdi:shield-percent-outline
+    min: 1.00
+    max: 1.30
+    step: 0.01
+    mode: box
+  se_nf_coverage_lead_max_min:
+    name: "Netzdienlich V2.8: Max. Vorzug bei wenig PV-Puffer"
+    icon: mdi:clock-fast
+    min: 0
+    max: 180
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_planning_charge_power_w:
+    name: "Netzdienlich V2.8: Rechen-Ladeleistung"
+    icon: mdi:flash
+    min: 1000
+    max: 5000
+    step: 100
+    mode: slider
+    unit_of_measurement: "W"
+  se_nf_start_safety_buffer_min:
+    name: "Netzdienlich V2.8: Start-Sicherheitspuffer"
+    icon: mdi:clock-alert-outline
+    min: 0
+    max: 180
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_min_start_hour:
+    name: "Netzdienlich V2.8: Frühester Normalstart"
+    icon: mdi:clock-start
+    min: 6
+    max: 18
+    step: 0.25
+    mode: slider
+    unit_of_measurement: "h"
+  se_nf_latest_finish_hour:
+    name: "Netzdienlich V2.8: Ziel-Fertig-Zeit"
+    icon: mdi:clock-end
+    min: 12
+    max: 22
+    step: 0.25
+    mode: slider
+    unit_of_measurement: "h"
+  se_nf_session_end_grace_min:
+    name: "Netzdienlich V2.8: Session-Nachlauf nach Ziel-Ende"
+    icon: mdi:timer-sand
+    min: 0
+    max: 180
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_weather_current_weight_pct:
+    name: "Netzdienlich V2.8: Gewicht aktuelles Wetter"
+    icon: mdi:weather-cloudy-clock
+    min: 0
+    max: 80
+    step: 5
+    mode: slider
+    unit_of_measurement: "%"
+  se_nf_weather_missing_forecast_factor:
+    name: "Netzdienlich V2.8: Wetter-Fallback ohne Stundenforecast"
+    icon: mdi:weather-question
+    min: 0.55
+    max: 1.00
+    step: 0.05
+    mode: slider
+  se_nf_weather_max_lead_min:
+    name: "Netzdienlich V2.8: Max. Wetter-Vorverlegung"
+    icon: mdi:weather-cloudy-clock
+    min: 0
+    max: 180
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_replan_threshold_min:
+    name: "Netzdienlich V2.8: Replan-Schwelle vor OPEN"
+    icon: mdi:calendar-sync
+    min: 0
+    max: 180
+    step: 5
+    mode: slider
+    unit_of_measurement: "min"
+  se_nf_write_min_delta_w:
+    name: "Netzdienlich V2.8: Min. Änderung für Write"
+    icon: mdi:delta
+    min: 0
+    max: 1000
+    step: 50
+    mode: slider
+    unit_of_measurement: "W"
+  se_nf_write_cooldown_s:
+    name: "Netzdienlich V2.8: Write-Cooldown"
+    icon: mdi:timer-sand
+    min: 60
+    max: 1800
+    step: 30
+    mode: slider
+    unit_of_measurement: "s"
+  se_nf_write_lock_s:
+    name: "Netzdienlich V2.8: Write-Lock"
+    icon: mdi:lock-clock
+    min: 10
+    max: 300
+    step: 5
+    mode: slider
+    unit_of_measurement: "s"
+  se_nf_last_applied_charge_limit_w:
+    name: "Netzdienlich V2.8: Letztes bestätigtes Charge-Limit"
+    icon: mdi:check-decagram-outline
+    min: 0
+    max: 5000
+    step: 50
+    mode: box
+    unit_of_measurement: "W"
+  se_nf_battery_capacity_kwh_manual:
+    name: "Speichergröße manuell"
+    icon: mdi:battery-high
+    min: 0
+    max: 50
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kWh"
+  se_nf_lifetime_soc_buffer_pct:
+    name: "Akku schonen: zusätzlicher Puffer"
+    icon: mdi:battery-plus-variant
+    min: 0
+    max: 60
+    step: 10
+    mode: slider
+    unit_of_measurement: "%"
+input_select:
+  se_nf_optimization_mode:
+    name: "Netzdienlich V2.9:  Optimierungsmodus"
+    icon: mdi:tune-variant
+    options:
+      - Eigenverbrauch maximieren
+      - Netzdienlich laden
+      - Akku schonen
+      - EVOpt optimiert
+  se_nf_session_state:
+    name: "Netzdienlich V2.8: Session State"
+    icon: mdi:state-machine
+    options:
+      - closed
+      - armed
+      - open
+      - battery_full_open
+      - done
+      - evcc_override
+      - low_soc
+      - risk
+    initial: closed
+input_datetime:
+  se_nf_session_planned_start:
+    name: "Netzdienlich V2.8: Geplanter Start"
+    icon: mdi:clock-start
+    has_date: true
+    has_time: true
+  se_nf_last_open_write:
+    name: "Netzdienlich V2.8: Letzte Ladefreigabe"
+    icon: mdi:timer-lock-open
+    has_date: true
+    has_time: true
+  se_nf_last_write:
+    name: "Netzdienlich V2.8: Letzter Write"
+    icon: mdi:clock-outline
+    has_date: true
+    has_time: true
+  se_nf_write_lock_until:
+    name: "Netzdienlich V2.8: Write-Lock bis"
+    icon: mdi:lock-clock
+    has_date: true
+    has_time: true
+template:
+  - sensor:
+      - name: "SE NF Battery SoE"
+        unique_id: se_nf_battery_soe
+        unit_of_measurement: "%"
+        icon: mdi:battery-heart
+        state: >-
+          {% set e = states('input_text.se_nf_battery_soe_entity') | trim %}
+          {% if e and states(e) not in ['unknown','unavailable','none',''] %}
+            {{ [[states(e) | float(0), 0] | max, 100] | min | round(1) }}
+          {% else %}
+            unavailable
+          {% endif %}
+      - name: "SE NF Backup Reserve Pct"
+        unique_id: se_nf_backup_reserve_pct
+        unit_of_measurement: "%"
+        icon: mdi:battery-lock
+        state: >-
+          {% set e =
+            states('input_text.se_nf_backup_reserve_entity') | trim
+          %}
+          {% set bad =
+            ['unknown','unavailable','none','None','']
+          %}
+          {% set fallback =
+            states(
+              'input_number.se_nf_backup_reserve_fallback_pct'
+            ) | float(0)
+          %}
+          {% if e not in bad and states(e) not in bad %}
+            {{
+              [[states(e) | float(0), 0] | max, 100]
+              | min
+              | round(1)
+            }}
+          {% else %}
+            {{
+              [[fallback, 0] | max, 100]
+              | min
+              | round(1)
+            }}
+          {% endif %}
+        attributes:
+          source: >-
+            {% set e =
+              states('input_text.se_nf_backup_reserve_entity') | trim
+            %}
+            {% set bad =
+              ['unknown','unavailable','none','None','']
+            %}
+            {% if e in bad %}
+              no_backup_or_manual_fallback
+            {% elif states(e) in bad %}
+              configured_entity_unavailable_fallback
+            {% else %}
+              mapped_entity
+            {% endif %}
+          mapped_entity: >-
+            {{
+              states('input_text.se_nf_backup_reserve_entity')
+              | trim
+            }}
+          mapped_state: >-
+            {% set e =
+              states('input_text.se_nf_backup_reserve_entity') | trim
+            %}
+            {{ states(e) if e else 'not_configured' }}
+          fallback_pct: >-
+            {{
+              states(
+                'input_number.se_nf_backup_reserve_fallback_pct'
+              )
+            }}
+      - name: "SE NF Planning Profile Effective"
+        unique_id: se_nf_planning_profile_effective
+        icon: mdi:source-branch
+        state: >-
+          {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+
+          {% if selected == 'EVOpt optimiert' %}
+            Netzdienlich laden
+          {% elif selected in ['Eigenverbrauch maximieren','Netzdienlich laden','Akku schonen'] %}
+            {{ selected }}
+          {% else %}
+            Netzdienlich laden
+          {% endif %}
+        attributes:
+          selected_mode: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          purpose: Planungsprofil und EVOpt-Fallback
+          fallback_profile: Netzdienlich laden
+          active_control: "{{ states('sensor.se_nf_active_control_label') }}"
+      - name: "Speichermanagement Version"
+        unique_id: se_nf_package_version
+        icon: mdi:package-variant
+        state: "0.0.1"
+        attributes:
+          project: SolarEdge Energy Controller
+          compatibility_namespace: se_nf
+          architecture: modular_mode_arbiter_single_writers
+          release: v0.0.1
+          release_candidate: RC5-HF1
+          grid_peak_strategy: configured_window_center
+      - name: "SE NF Optimization Mode Effective"
+        unique_id: se_nf_optimization_mode_effective
+        icon: mdi:tune-variant
+        state: >-
+          {% set mode = states('input_select.se_nf_optimization_mode') %}
+          {% if mode in ['Eigenverbrauch maximieren','Netzdienlich laden','Akku schonen','EVOpt optimiert'] %}
+            {{ mode }}
+          {% else %}
+            Netzdienlich laden
+          {% endif %}
+        attributes:
+          project: SolarEdge Energy Controller
+          evopt_active_capable: true
+          planning_profile_entity: sensor.se_nf_planning_profile_effective
+      - name: "SE NF Charge Limit Entity Resolved"
+        unique_id: se_nf_charge_limit_entity_resolved
+        icon: mdi:lightning-bolt
+        state: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+        attributes:
+          configured_entity: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          note: "v2.9.8: Writer-Ziel wird über input_text.se_nf_charge_limit_entity konfiguriert."
+      - name: "SE NF Weather Entity Resolved"
+        unique_id: se_nf_weather_entity_resolved
+        icon: mdi:weather-partly-cloudy
+        state: >-
+          {% set cfg = states('input_text.se_nf_weather_entity') | trim %}
+          {% if cfg and states(cfg) not in ['unknown','unavailable','none',''] %}
+            {{ cfg }}
+          {% else %}
+            {% set ws = states.weather | list %}
+            {% if ws | count > 0 %}
+              {{ ws[0].entity_id }}
+            {% else %}
+              unknown
+            {% endif %}
+          {% endif %}
+      - name: "SE NF Charge Limit Actual"
+        unique_id: se_nf_charge_limit_actual
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:lightning-bolt
+        state: >-
+          {% set e = states('input_text.se_nf_charge_limit_entity') | trim %}
+          {% if states(e) not in ['unknown','unavailable','none',''] %}
+            {{ states(e) | float(0) | round(0) }}
+          {% else %}
+            unavailable
+          {% endif %}
+        attributes:
+          source_entity: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+          configured_entity: "{{ states('input_text.se_nf_charge_limit_entity') | trim }}"
+      - name: "SE NF Battery Capacity kWh"
+        unique_id: se_nf_battery_capacity_kwh
+        unit_of_measurement: "kWh"
+        device_class: energy
+        icon: mdi:battery
+        state: >-
+          {% set e = states('input_text.se_nf_battery_capacity_entity') | trim %}
+          {% set raw = states(e) if e else 'unknown' %}
+          {% set fallback = states('input_number.se_nf_battery_capacity_kwh_fallback') | float(0) %}
+          {% if raw not in ['unknown','unavailable','none',''] and (raw | float(0)) > 0 %}
+            {% set v = raw | float(0) %}
+            {% if v > 100 %}
+              {{ (v / 1000) | round(2) }}
+            {% else %}
+              {{ v | round(2) }}
+            {% endif %}
+          {% elif fallback > 0 %}
+            {{ fallback | round(2) }}
+          {% else %}
+            unavailable
+          {% endif %}

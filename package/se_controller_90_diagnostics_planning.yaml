@@ -1,0 +1,735 @@
+# SolarEdge Energy Controller v0.0.1 · Planung, Diagnose und Latches
+# Historische Merge-Kommentare und doppelte Writer wurden entfernt.
+
+template:
+  - sensor:
+      - name: "SE NF Adaptive Forecast Bias Minutes"
+        unique_id: se_nf_adaptive_forecast_bias_minutes
+        unit_of_measurement: "min"
+        icon: mdi:clock-edit
+        state: >-
+          {% set enabled = is_state('input_boolean.se_nf_adaptive_forecast_bias_enabled','on') %}
+          {% set safe = is_state('sensor.se_nf_sanity_check','ok')
+                        and is_state('sensor.se_nf_config_check','ok')
+                        and is_state('binary_sensor.se_nf_risk_flag','off') %}
+          {% if not enabled or not safe %}
+            0
+          {% else %}
+            {% set mode = states('sensor.se_nf_planning_profile_effective') %}
+            {% set raw = states('sensor.se_nf_adaptive_forecast_raw_shift_minutes') | float(0) %}
+
+            {% if mode == 'Akku schonen' %}
+              {% set lo = -30 %}
+              {% set hi = 45 %}
+            {% elif mode == 'Netzdienlich laden' %}
+              {% set lo = -45 %}
+              {% set hi = 60 %}
+            {% elif mode == 'Eigenverbrauch maximieren' %}
+              {% set lo = 0 %}
+              {% set hi = 30 %}
+            {% else %}
+              {% set lo = -20 %}
+              {% set hi = 30 %}
+            {% endif %}
+
+            {% set bounded = ([[raw, lo] | max, hi] | min) | round(0) | int(0) %}
+            {% if bounded | abs < 10 %}
+              0
+            {% else %}
+              {{ bounded }}
+            {% endif %}
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Bias Version"
+        unique_id: se_nf_adaptive_forecast_bias_version
+        icon: mdi:tag
+        state: "2.9.3a-adaptive-forecast-bias"
+      - name: "SE NF Adaptive Forecast Expected PV Until Now"
+        unique_id: se_nf_adaptive_forecast_expected_pv_until_now
+        unit_of_measurement: "kWh"
+        icon: mdi:chart-line
+        state: >-
+          {% set total = states('sensor.se_nf_pv_forecast_today_total') | float(0) %}
+          {% set rem = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+          {{ ([total - rem, 0] | max) | round(3) }}
+      - name: "SE NF Adaptive Forecast Live Blend"
+        unique_id: se_nf_adaptive_forecast_live_blend
+        icon: mdi:tune-variant
+        state: >-
+          {% set raw = states('sensor.se_nf_adaptive_forecast_live_raw') | float(1) %}
+          {% set rel = states('sensor.se_nf_adaptive_forecast_live_reliability') | float(0) %}
+          {% set rawc = ([[raw, 0.70] | max, 1.20] | min) %}
+          {% set weight = 0.35 * rel %}
+          {% set blend = 1 + weight * (rawc - 1) %}
+          {{ ([[blend, 0.88] | max, 1.08] | min) | round(3) }}
+      - name: "SE NF Adaptive Forecast Live Raw"
+        unique_id: se_nf_adaptive_forecast_live_raw
+        icon: mdi:chart-bell-curve
+        state: >-
+          {% set actual = states('sensor.se_nf_adaptive_pv_actual_today') | float(0) %}
+          {% set expected = states('sensor.se_nf_adaptive_forecast_expected_pv_until_now') | float(0) %}
+          {% set src = states('sensor.se_nf_adaptive_pv_actual_today_source') %}
+          {% if src == 'none' or expected <= 0.2 %}
+            1.0
+          {% else %}
+            {{ (actual / expected) | round(3) }}
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Live Reliability"
+        unique_id: se_nf_adaptive_forecast_live_reliability
+        icon: mdi:signal
+        state: >-
+          {% set expected = states('sensor.se_nf_adaptive_forecast_expected_pv_until_now') | float(0) %}
+          {% set total = states('sensor.se_nf_pv_forecast_today_total') | float(0) %}
+          {% if total <= 0 %}
+            0
+          {% else %}
+            {% set progress = expected / total %}
+            {% set rel = (progress - 0.05) / 0.35 %}
+            {{ ([[rel, 0] | max, 1] | min) | round(3) }}
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Raw Shift Minutes"
+        unique_id: se_nf_adaptive_forecast_raw_shift_minutes
+        unit_of_measurement: "min"
+        icon: mdi:clock-fast
+        state: >-
+          {% set rem = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+          {% set weather = states('sensor.se_nf_weather_planning_factor_today') | float(1) %}
+          {% set base_pv = rem * weather %}
+          {% set load = states('sensor.se_nf_remaining_consumption_today') | float(states('sensor.se_nf_load_forecast_7d_cached') | float(0))
+          %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set base_buffer = base_pv - load - need %}
+
+          {% set shadow = states('sensor.se_nf_adaptive_forecast_shadow_buffer') | float(base_buffer) %}
+          {% set delta = shadow - base_buffer %}
+          {% set power = states('input_number.se_nf_planning_charge_power_w') | float(3500) / 1000 %}
+          {% if power <= 0 %}
+            0
+          {% else %}
+            {{ ((-delta / power) * 60) | round(1) }}
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Shadow Buffer"
+        unique_id: se_nf_adaptive_forecast_shadow_buffer
+        unit_of_measurement: "kWh"
+        icon: mdi:battery-clock
+        state: >-
+          {% set rem = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+          {% set weather = states('sensor.se_nf_weather_planning_factor_today') | float(1) %}
+          {% set base_pv = rem * weather %}
+          {% set blend = states('sensor.se_nf_adaptive_forecast_live_blend') | float(1) %}
+          {% set corrected_pv = base_pv * blend %}
+          {% set load = states('sensor.se_nf_remaining_consumption_today') | float(states('sensor.se_nf_load_forecast_7d_cached') | float(0))
+          %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set cap = states('sensor.se_nf_battery_capacity_kwh') | float(0) %}
+          {% set dpct = states('sensor.se_nf_adaptive_forecast_target_delta_pct') | float(0) %}
+          {% set delta_kwh = cap * dpct / 100 %}
+          {% set effective_need = [need + delta_kwh, 0] | max %}
+          {{ (corrected_pv - load - effective_need) | round(2) }}
+      - name: "SE NF Adaptive Forecast Summary"
+        unique_id: se_nf_adaptive_forecast_summary
+        icon: mdi:clipboard-text-clock
+        state: >-
+          {% set enabled = is_state('input_boolean.se_nf_adaptive_forecast_bias_enabled','on') %}
+          {% set bias = states('sensor.se_nf_adaptive_forecast_bias_minutes') | int(0) %}
+          {% set raw = states('sensor.se_nf_adaptive_forecast_raw_shift_minutes') | float(0) %}
+          {% set live = states('sensor.se_nf_adaptive_forecast_live_blend') | float(1) %}
+          {% set trend = states('sensor.se_nf_adaptive_forecast_trend') %}
+          {% set shadow = states('sensor.se_nf_adaptive_forecast_shadow_buffer') | float(0) %}
+          {% if not enabled %}
+            aus · raw {{ raw | round(0) }} min · live {{ live }} · trend {{ trend }} · puffer {{ shadow }} kWh
+          {% elif bias > 0 %}
+            aktiv · {{ bias }} min früher · raw {{ raw | round(0) }} · live {{ live }} · trend {{ trend }} · puffer {{ shadow }} kWh
+          {% elif bias < 0 %}
+            aktiv · {{ bias | abs }} min später · raw {{ raw | round(0) }} · live {{ live }} · trend {{ trend }} · puffer {{ shadow }} kWh
+          {% else %}
+            aktiv · neutral · raw {{ raw | round(0) }} min · live {{ live }} · trend {{ trend }} · puffer {{ shadow }} kWh
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Target Delta Pct"
+        unique_id: se_nf_adaptive_forecast_target_delta_pct
+        unit_of_measurement: "%"
+        icon: mdi:battery-sync
+        state: >-
+          {% set mode = states('sensor.se_nf_planning_profile_effective') %}
+          {% set score = states('sensor.se_nf_adaptive_forecast_trend_score') | float(0) %}
+          {% set raw = -score / 4 %}
+          {% if mode == 'Akku schonen' %}
+            {{ ([[raw, -2.0] | max, 6.0] | min) | round(2) }}
+          {% elif mode == 'Netzdienlich laden' %}
+            {% set v = raw * 0.5 %}
+            {{ ([[v, -1.0] | max, 3.0] | min) | round(2) }}
+          {% elif mode == 'Eigenverbrauch maximieren' %}
+            {{ ([[raw, 0.0] | max, 4.0] | min) | round(2) }}
+          {% else %}
+            0
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Trend"
+        unique_id: se_nf_adaptive_forecast_trend
+        icon: mdi:calendar-range
+        state: >-
+          {% set score = states('sensor.se_nf_adaptive_forecast_trend_score') | float(0) %}
+          {% if score >= 8 %}
+            stark
+          {% elif score >= 2 %}
+            normal_gut
+          {% elif score >= -2 %}
+            neutral
+          {% elif score >= -6 %}
+            schwach
+          {% else %}
+            kritisch
+          {% endif %}
+      - name: "SE NF Adaptive Forecast Trend Score"
+        unique_id: se_nf_adaptive_forecast_trend_score
+        unit_of_measurement: "kWh"
+        icon: mdi:calendar-range
+        state: >-
+          {% set load = states('sensor.se_nf_load_forecast_7d_cached') | float(0) %}
+          {% set tomorrow = states('sensor.se_nf_pv_forecast_tomorrow') | float(0) %}
+          {% set over = states('sensor.se_nf_adaptive_pv_overmorrow') | float(tomorrow) %}
+          {% set score = 0.65 * (tomorrow - load) + 0.35 * (over - load) %}
+          {{ score | round(2) }}
+      - name: "SE NF Adaptive PV Actual Today"
+        unique_id: se_nf_adaptive_pv_actual_today
+        unit_of_measurement: "kWh"
+        icon: mdi:solar-power
+        state: >-
+          {% set eid = states('sensor.se_nf_adaptive_pv_actual_today_source') %}
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set unit = state_attr(eid, 'unit_of_measurement') %}
+          {% if eid.startswith('sensor.') and states(eid) not in bad and is_number(states(eid)) %}
+            {% set value = states(eid) | float(0) %}
+            {% if unit == 'Wh' %}
+              {{ (value / 1000) | round(3) }}
+            {% elif unit == 'MWh' %}
+              {{ (value * 1000) | round(3) }}
+            {% else %}
+              {{ value | round(3) }}
+            {% endif %}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          source_entity: "{{ states('sensor.se_nf_adaptive_pv_actual_today_source') }}"
+          source_unit: >-
+            {{ state_attr(states('sensor.se_nf_adaptive_pv_actual_today_source'), 'unit_of_measurement') }}
+          source_kind: >-
+            {{ state_attr('sensor.se_nf_adaptive_pv_actual_today_source', 'source_kind') }}
+      - name: "SE NF Adaptive PV Actual Today Source"
+        unique_id: se_nf_adaptive_pv_actual_today_source
+        icon: mdi:solar-power
+        state: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set energy_units = ['Wh','kWh','MWh'] %}
+          {% set configured = states('input_text.se_nf_actual_pv_today_entities') | trim %}
+          {% set candidates = configured.split(',') if configured not in bad else [] %}
+          {% set ns = namespace(eid='none') %}
+          {% for eid in candidates %}
+            {% set e = eid | string | trim %}
+            {% set unit = state_attr(e, 'unit_of_measurement') %}
+            {% if ns.eid == 'none'
+                  and e.startswith('sensor.')
+                  and states(e) not in bad
+                  and is_number(states(e))
+                  and unit in energy_units %}
+              {% set ns.eid = e %}
+            {% endif %}
+          {% endfor %}
+          {% set meter = 'sensor.se_nf_pv_actual_today_meter' %}
+          {% set source_e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+          {% set source_unit = state_attr(source_e, 'unit_of_measurement') %}
+          {% set source_valid = source_e.startswith('sensor.')
+                                and states(source_e) not in bad
+                                and is_number(states(source_e))
+                                and source_unit in energy_units %}
+          {% set meter_valid = states(meter) not in bad
+                               and is_number(states(meter))
+                               and state_attr(meter, 'unit_of_measurement') in energy_units %}
+          {% if ns.eid == 'none' and source_valid and meter_valid %}
+            {% set ns.eid = meter %}
+          {% endif %}
+          {{ ns.eid }}
+        attributes:
+          configured_candidates: >-
+            {{ states('input_text.se_nf_actual_pv_today_entities') | trim }}
+          meter_source_entity: >-
+            {{ states('input_text.se_nf_pv_actual_meter_source_entity') | trim }}
+          source_kind: >-
+            {% set bad = ['unknown','unavailable','none','None',''] %}
+            {% set energy_units = ['Wh','kWh','MWh'] %}
+            {% set configured = states('input_text.se_nf_actual_pv_today_entities') | trim %}
+            {% set candidates = configured.split(',') if configured not in bad else [] %}
+            {% set ns = namespace(valid=false) %}
+            {% for eid in candidates %}
+              {% set e = eid | string | trim %}
+              {% if not ns.valid and e.startswith('sensor.') and states(e) not in bad and is_number(states(e)) and state_attr(e, 'unit_of_measurement')
+            in energy_units %}
+                {% set ns.valid = true %}
+              {% endif %}
+            {% endfor %}
+            {% set source_e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+            {% set source_valid = source_e.startswith('sensor.') and states(source_e) not in bad and is_number(states(source_e)) and state_attr(source_e,
+            'unit_of_measurement') in energy_units %}
+            {% set meter_valid = states('sensor.se_nf_pv_actual_today_meter') not in bad and is_number(states('sensor.se_nf_pv_actual_today_meter'))
+            and state_attr('sensor.se_nf_pv_actual_today_meter', 'unit_of_measurement') in energy_units %}
+            {% if ns.valid %}configured_candidate
+            {% elif source_valid and meter_valid %}utility_meter_fallback
+            {% else %}optional_inactive
+            {% endif %}
+      - name: "SE NF Adaptive PV Overmorrow"
+        unique_id: se_nf_adaptive_pv_overmorrow
+        unit_of_measurement: "kWh"
+        icon: mdi:weather-sunny-alert
+        state: >-
+          {% set eid = states('sensor.se_nf_adaptive_pv_overmorrow_source') %}
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% if eid.startswith('sensor.') and states(eid) not in bad %}
+            {{ states(eid) | float(0) | round(2) }}
+          {% else %}
+            {{ states('sensor.se_nf_pv_forecast_tomorrow') | float(0) | round(2) }}
+          {% endif %}
+      - name: "SE NF Adaptive PV Overmorrow Source"
+        unique_id: se_nf_adaptive_pv_overmorrow_source
+        icon: mdi:weather-sunny-alert
+        state: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set candidates = states('input_text.se_nf_pv_overmorrow_entities').split(',') %}
+          {% set ns = namespace(eid='none') %}
+          {% for eid in candidates %}
+            {% set e = eid | string | trim %}
+            {% if ns.eid == 'none' and e.startswith('sensor.') and states(e) not in bad %}
+              {% set ns.eid = e %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.eid }}
+      - name: "SE NF Live Battery PV Margin"
+        unique_id: se_nf_live_battery_pv_margin
+        unit_of_measurement: "kWh"
+        icon: mdi:battery-clock
+        state: >-
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set pv_for_akku = states('sensor.se_nf_available_pv_for_battery_today') | float(none) %}
+          {% if pv_for_akku is number %}
+            {{ (pv_for_akku - need) | round(2) }}
+          {% else %}
+            {% set rem = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+            {% set weather = states('sensor.se_nf_weather_planning_factor_today') | float(1) %}
+            {% set daily_load = states('sensor.se_nf_remaining_consumption_today') | float(states('sensor.se_nf_load_forecast_7d_cached') | float(0))
+          %}
+            {{ ((rem * weather) - daily_load - need) | round(2) }}
+          {% endif %}
+      - name: "SE NF Live Forecast Gap Guard Version"
+        unique_id: se_nf_live_forecast_gap_guard_version
+        icon: mdi:tag
+        state: "2.9.3b-live-forecast-gap-guard"
+      - name: "SE NF Live Forecast Gap Lead Minutes"
+        unique_id: se_nf_live_forecast_gap_lead_minutes
+        unit_of_measurement: "min"
+        icon: mdi:clock-fast
+        state: >-
+          {% set enabled = is_state('input_boolean.se_nf_adaptive_forecast_bias_enabled','on') %}
+          {% set safe = is_state('sensor.se_nf_sanity_check','ok')
+                        and is_state('sensor.se_nf_config_check','ok')
+                        and is_state('binary_sensor.se_nf_risk_flag','off') %}
+          {% set session = states('input_select.se_nf_session_state') %}
+          {% set ratio = states('sensor.se_nf_live_pv_forecast_ratio_now') | float(1) %}
+          {% set margin = states('sensor.se_nf_live_battery_pv_margin') | float(99) %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set forecast_now = states('sensor.se_nf_live_pv_forecast_now') | float(0) %}
+          {% set mode = states('sensor.se_nf_planning_profile_effective') %}
+
+          {% if not enabled or not safe or session not in ['closed','armed'] or need <= 0.10 or forecast_now < 100 %}
+            0
+          {% else %}
+            {% if ratio < 0.35 and margin < 0.30 %}
+              {% set lead = 45 %}
+            {% elif ratio < 0.50 and margin < 0.50 %}
+              {% set lead = 30 %}
+            {% elif ratio < 0.70 and margin < 0.30 %}
+              {% set lead = 15 %}
+            {% else %}
+              {% set lead = 0 %}
+            {% endif %}
+
+            {% if mode == 'Akku schonen' %}
+              {{ [lead, 45] | min }}
+            {% elif mode == 'Netzdienlich laden' %}
+              {{ [lead, 60] | min }}
+            {% elif mode == 'Eigenverbrauch maximieren' %}
+              {{ [lead, 30] | min }}
+            {% else %}
+              {{ [lead, 30] | min }}
+            {% endif %}
+          {% endif %}
+      - name: "SE NF Live Forecast Gap Summary"
+        unique_id: se_nf_live_forecast_gap_summary
+        icon: mdi:clipboard-alert
+        state: >-
+          {% set ratio = states('sensor.se_nf_live_pv_forecast_ratio_now') | float(1) %}
+          {% set actual = states('sensor.se_nf_live_pv_actual_now') | float(0) %}
+          {% set forecast = states('sensor.se_nf_live_pv_forecast_now') | float(0) %}
+          {% set margin = states('sensor.se_nf_live_battery_pv_margin') | float(0) %}
+          {% set lead = states('sensor.se_nf_live_forecast_gap_lead_minutes') | int(0) %}
+          {% if lead > 0 %}
+            aktiv · {{ lead }} min früher · PV {{ actual | round(0) }}W statt {{ forecast | round(0) }}W · Ratio {{ (ratio*100) | round(0) }}%
+          · Akku-Puffer {{ margin }} kWh
+          {% else %}
+            neutral · PV {{ actual | round(0) }}W statt {{ forecast | round(0) }}W · Ratio {{ (ratio*100) | round(0) }}% · Akku-Puffer {{ margin
+          }} kWh
+          {% endif %}
+      - name: "SE NF Live PV Actual Now"
+        unique_id: se_nf_live_pv_actual_now
+        unit_of_measurement: "W"
+        icon: mdi:solar-power-variant
+        state: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set candidates = states('input_text.se_nf_live_pv_power_entities').split(',') %}
+          {% set ns = namespace(found=false, v=0) %}
+          {% for eid in candidates %}
+            {% if not ns.found and states(eid) not in bad %}
+              {% set ns.v = states(eid) | float(0) %}
+              {% set ns.found = true %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.v | round(0) }}
+      - name: "SE NF Live PV Forecast Now"
+        unique_id: se_nf_live_pv_forecast_now
+        unit_of_measurement: "W"
+        icon: mdi:solar-power
+        state: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set configured = states('input_text.se_nf_forecast_now_entity') | trim %}
+          {% set candidates = [configured] %}
+          {% set ns = namespace(found=false, v=0) %}
+          {% for eid in candidates %}
+            {% if not ns.found and states(eid) not in bad %}
+              {% set ns.v = states(eid) | float(0) %}
+              {% set ns.found = true %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.v | round(0) }}
+      - name: "SE NF Live PV Forecast Ratio Now"
+        unique_id: se_nf_live_pv_forecast_ratio_now
+        icon: mdi:percent
+        state: >-
+          {% set actual = states('sensor.se_nf_live_pv_actual_now') | float(0) %}
+          {% set forecast = states('sensor.se_nf_live_pv_forecast_now') | float(0) %}
+          {% if forecast < 50 %}
+            1.0
+          {% else %}
+            {{ [actual / forecast, 1] | min | round(3) }}
+          {% endif %}
+      - name: "SE NF PV Actual Meter Source Energy"
+        unique_id: se_nf_pv_actual_meter_source_energy
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:solar-power-variant
+        availability: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set energy_units = ['Wh','kWh','MWh'] %}
+          {% set e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+          {{ e.startswith('sensor.')
+             and states(e) not in bad
+             and is_number(states(e))
+             and state_attr(e, 'unit_of_measurement') in energy_units }}
+        state: >-
+          {% set e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+          {% set unit = state_attr(e, 'unit_of_measurement') %}
+          {% set value = states(e) | float(0) %}
+          {% if unit == 'Wh' %}
+            {{ (value / 1000) | round(3) }}
+          {% elif unit == 'MWh' %}
+            {{ (value * 1000) | round(3) }}
+          {% else %}
+            {{ value | round(3) }}
+          {% endif %}
+        attributes:
+          source_entity: "{{ states('input_text.se_nf_pv_actual_meter_source_entity') | trim }}"
+          source_unit: >-
+            {% set e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+            {{ state_attr(e, 'unit_of_measurement') }}
+          source_state_class: >-
+            {% set e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+            {{ state_attr(e, 'state_class') }}
+          mapping_status: >-
+            {% set bad = ['unknown','unavailable','none','None',''] %}
+            {% set energy_units = ['Wh','kWh','MWh'] %}
+            {% set e = states('input_text.se_nf_pv_actual_meter_source_entity') | trim %}
+            {% if e in bad %}
+              optional_inactive
+            {% elif not e.startswith('sensor.') or states(e) in bad or not is_number(states(e)) %}
+              invalid_mapping
+            {% elif state_attr(e, 'unit_of_measurement') not in energy_units %}
+              invalid_unit
+            {% else %}
+              active
+            {% endif %}
+  # MIGRATED_FROM: packages/se_nf_08_planning_helpers.yaml
+  - sensor:
+      - name: "SE NF Live Consumption Power Now"
+        unique_id: se_nf_live_consumption_power_now
+        unit_of_measurement: "W"
+        device_class: power
+        icon: mdi:home-lightning-bolt-outline
+        state: >-
+          {% set bad = ['unknown','unavailable','none','None',''] %}
+          {% set candidates = states('input_text.se_nf_live_consumption_power_entities').split(',') %}
+          {% set ns = namespace(found=false, v=0) %}
+          {% for eid in candidates %}
+            {% set e = eid | trim %}
+            {% if not ns.found and e not in bad and states(e) not in bad %}
+              {% set ns.v = states(e) | float(0) %}
+              {% set ns.found = true %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.v | round(0) }}
+
+automation:
+  - id: se_nf_v288_sql_load_forecast_poll
+    alias: "SolarEdge Energy Controller: Lastprognose – SQL aktualisieren"
+    mode: single
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/10"
+    action:
+      - service: homeassistant.update_entity
+        target:
+          entity_id: sensor.se_nf_load_forecast_7d_cached
+  - id: se_nf_v28_new_day_reset
+    alias: "SolarEdge Energy Controller: Tageswechsel zurücksetzen"
+    mode: single
+    trigger:
+      - platform: time
+        at: "06:00:00"
+    action:
+      - variables:
+          cfg_ok: "{{ is_state('sensor.se_nf_config_check','ok') }}"
+          sanity_ok: "{{ is_state('sensor.se_nf_sanity_check','ok') }}"
+          selected_mode: "{{ states('input_select.se_nf_optimization_mode') }}"
+          mode: "{{ states('sensor.se_nf_planning_profile_effective') }}"
+          soe: "{{ states('sensor.se_nf_battery_soe') | float(0) }}"
+          low: "{{ states('input_number.se_nf_low_soc_floor_pct') | float(25) }}"
+          cap: "{{ states('sensor.se_nf_battery_capacity_kwh') | float(0) }}"
+          reserve: "{{ states('sensor.se_nf_backup_reserve_pct') | float(0) }}"
+          safety_kwh: "{{ states('input_number.se_nf_lifetime_safety_kwh') | float(1.0) }}"
+          reserve_guard_soc: >-
+            {% set dynamic = reserve | float(0) + ((safety_kwh | float(0)) / (cap | float(0)) * 100) if cap | float(0) > 0 else low | float(25)
+            %}
+            {{ [low | float(25), dynamic] | max }}
+          need: "{{ states('sensor.se_nf_needed_energy') | float(0) }}"
+          evcc: "{{ is_state('binary_sensor.se_nf_evcc_grid_charge_request','on') }}"
+          next_state: >-
+            {% if not cfg_ok or not sanity_ok %}
+              risk
+            {% elif evcc %}
+              evcc_override
+            {% elif mode == 'Akku schonen'
+                  and need | float(0) > 0.05
+                  and soe | float(0) <= reserve_guard_soc | float(25) %}
+              low_soc
+            {% elif mode != 'Akku schonen' and soe | float(0) <= low | float(25) %}
+              low_soc
+            {% else %}
+              closed
+            {% endif %}
+  - id: se_nf_v28_plan_freeze
+    alias: "SolarEdge Energy Controller: Plan-Freeze Guard"
+    mode: restart
+    trigger:
+      - platform: homeassistant
+        event: start
+      - platform: time_pattern
+        minutes: "/15"
+      - platform: state
+        entity_id:
+          - sensor.se_nf_today_planned_start_candidate_timestamp
+          - sensor.se_nf_today_end_timestamp
+          - input_select.se_nf_session_state
+          - input_select.se_nf_optimization_mode
+          - input_number.se_nf_replan_threshold_min
+          - input_datetime.se_nf_session_planned_start
+    condition:
+      - condition: state
+        entity_id: input_boolean.se_netzdienlich_enabled
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.se_nf_config_ok
+        state: "on"
+    action:
+      - variables:
+          candidate_ts: "{{ states('sensor.se_nf_today_planned_start_candidate_timestamp') | int(0) }}"
+          current_ts: "{{ as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) }}"
+          threshold_s: "{{ states('input_number.se_nf_replan_threshold_min') | int(30) * 60 }}"
+          min_hour: "{{ states('sensor.se_nf_mode_min_start_hour') | float(11.75) }}"
+          min_h: "{{ min_hour | int(0) }}"
+          min_m: "{{ ((min_hour | float(11.75) - min_h | int(0)) * 60) | round(0) | int(0) }}"
+          min_ts: "{{ as_timestamp(today_at('%02d:%02d:00' | format(min_h | int(0), min_m | int(0))), 0) | int(0) }}"
+          end_ts: "{{ states('sensor.se_nf_today_end_timestamp') | int(0) }}"
+          day_start_ts: "{{ as_timestamp(today_at('06:00:00'), 0) | int(0) }}"
+          state_now: "{{ states('input_select.se_nf_session_state') }}"
+          active_session: "{{ state_now in ['open','battery_full_open'] }}"
+          candidate_valid: "{{ candidate_ts | int(0) >= min_ts | int(0) and candidate_ts | int(0) < end_ts | int(0) }}"
+          current_regular_valid: "{{ current_ts | int(0) >= min_ts | int(0) and current_ts | int(0) < end_ts | int(0) }}"
+          critical_planned_valid: >-
+            {{ is_state('input_boolean.se_nf_critical_deficit_latched_today','on')
+               and current_ts | int(0) >= day_start_ts | int(0)
+               and current_ts | int(0) < end_ts | int(0)
+               and is_state('sensor.se_nf_sanity_check','ok')
+               and is_state('sensor.se_nf_config_check','ok')
+               and is_state('binary_sensor.se_nf_risk_flag','off') }}
+          current_valid: "{{ current_regular_valid or critical_planned_valid }}"
+          mode_change: >-
+            {{ trigger is defined
+               and trigger.platform == 'state'
+               and trigger.entity_id == 'input_select.se_nf_optimization_mode'
+               and trigger.from_state is not none
+               and trigger.to_state is not none
+               and trigger.from_state.state != trigger.to_state.state }}
+          may_replan: >-
+            {{ not active_session
+               and not critical_planned_valid
+               and (state_now in ['closed','armed','done'] or not current_valid) }}
+      - condition: template
+        value_template: >-
+          {{ candidate_valid
+             and may_replan
+             and (
+               mode_change
+               or not current_valid
+               or current_ts | int(0) <= 0
+               or (candidate_ts | int(0) - current_ts | int(0)) | abs >= threshold_s | int(1800)
+             ) }}
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.se_nf_session_planned_start
+        data:
+          datetime: "{{ (candidate_ts | int(0)) | timestamp_custom('%Y-%m-%d %H:%M:%S', true) }}"
+  - id: se_nf_v293g_critical_deficit_daily_latch
+    alias: "SolarEdge Energy Controller: Kritisches Defizit – Tages-Latch"
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/2"
+      - platform: state
+        entity_id:
+          - input_boolean.se_netzdienlich_enabled
+          - input_select.se_nf_session_state
+          - sensor.se_nf_needed_energy
+          - sensor.se_nf_available_pv_for_battery_today
+          - sensor.se_nf_live_battery_pv_margin
+          - sensor.se_nf_live_pv_forecast_now
+          - sensor.se_nf_remaining_pv_today
+          - sensor.se_nf_sanity_check
+          - sensor.se_nf_config_check
+          - binary_sensor.se_nf_risk_flag
+          - binary_sensor.se_nf_evcc_grid_charge_request
+    condition:
+      - condition: state
+        entity_id: input_boolean.se_netzdienlich_enabled
+        state: "on"
+      - condition: template
+        value_template: >-
+          {% set now_ts = now().timestamp() | int(0) %}
+          {% set day_start_ts = as_timestamp(today_at('06:00:00'), 0) | int(0) %}
+          {% set end_grace_ts = states('sensor.se_nf_today_end_with_grace_timestamp') | int(0) %}
+          {{ now_ts >= day_start_ts and (end_grace_ts <= 0 or now_ts <= end_grace_ts) }}
+      - condition: template
+        value_template: "{{ states('input_select.se_nf_session_state') in ['closed','armed'] }}"
+      - condition: state
+        entity_id: sensor.se_nf_sanity_check
+        state: "ok"
+      - condition: state
+        entity_id: sensor.se_nf_config_check
+        state: "ok"
+      - condition: state
+        entity_id: binary_sensor.se_nf_risk_flag
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.se_nf_evcc_grid_charge_request
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.se_nf_critical_deficit_latched_today
+        state: "off"
+      - condition: template
+        alias: "Kritisches Defizit nur bei echtem Defizit"
+        value_template: >-
+          {% set soe = states('sensor.se_nf_battery_soe') | float(0) %}
+          {% set reserve = states('sensor.se_nf_backup_reserve_pct') | float(0) %}
+          {% set need = states('sensor.se_nf_needed_energy') | float(0) %}
+          {% set pv_for_akku = states('sensor.se_nf_available_pv_for_battery_today') | float(99) %}
+          {# V2.9.5: Legacy-Effective-Sensoren entfernt; aktuelle PV-Pufferlogik ist Quelle #}
+          {% set effective_pv = pv_for_akku %}
+          {% set delta = effective_pv - need %}
+          {% set margin = states('sensor.se_nf_live_battery_pv_margin') | float(99) %}
+          {% set remaining = states('sensor.se_nf_remaining_pv_today') | float(0) %}
+          {% set forecast_now = states('sensor.se_nf_live_pv_forecast_now') | float(0) %}
+          {% set coverage = states('sensor.se_nf_coverage_ratio') | float(0) %}
+          {% set good_day = coverage >= 1.2 and pv_for_akku >= need %}
+          {% set pv_now = states('sensor.se_nf_live_pv_actual_now') | float(0) %}
+          {% set cons_now = states('sensor.se_nf_live_consumption_power_now') | float(0) %}
+          {% set surplus_now = pv_now - cons_now %}
+          {% set early_def = states('input_number.se_nf_early_open_deficit_kwh') | float(0.5) %}
+          {% set real_deficit = [need - effective_pv, 0] | max %}
+          {% set min_deficit = [early_def, 0.5] | max %}
+          {% set soc_limit = [reserve + 12, 35] | max %}
+
+          {{
+            need >= 2.0
+            and soe <= soc_limit
+            and not good_day
+            and remaining > 1.0
+            and forecast_now >= 100
+            and real_deficit >= min_deficit
+            and delta < -0.5
+            and surplus_now < 500
+            and (margin <= -3.0 or pv_for_akku < (need * 0.50))
+          }}
+      - condition: template
+        value_template: >-
+          {{ true }}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.se_nf_critical_deficit_latched_today
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.se_nf_session_planned_start
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - service: system_log.write
+        data:
+          level: warning
+          message: >-
+            SE NF V2.9.3h Critical Deficit: Tages-Latch gesetzt und geplanter Start einmalig auf jetzt gesetzt.
+  - id: se_nf_v293g_critical_deficit_daily_latch_reset
+    alias: "SolarEdge Energy Controller: Kritisches Defizit – Tages-Latch Reset"
+    mode: single
+    trigger:
+      - platform: time
+        at: "05:30:00"
+      - platform: homeassistant
+        event: start
+    condition:
+      - condition: template
+        value_template: >-
+          {% set planned_ts = as_timestamp(states('input_datetime.se_nf_session_planned_start'), 0) | int(0) %}
+          {% set day_start_ts = as_timestamp(today_at('06:00:00'), 0) | int(0) %}
+          {{ planned_ts <= 0 or planned_ts < day_start_ts }}
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.se_nf_critical_deficit_latched_today
+
+# MIGRATED_FROM: packages/se_nf_08_planning_helpers.yaml
+input_number:
+  se_nf_early_open_deficit_kwh:
+    name: "Netzdienlich: Frühe Freigabe Defizit (kWh)"
+    min: 0.2
+    max: 5.0
+    step: 0.1
+    unit_of_measurement: "kWh"
+    mode: slider
+    icon: mdi:battery-minus-outline
+

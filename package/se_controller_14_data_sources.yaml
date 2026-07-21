@@ -1,0 +1,206 @@
+# SolarEdge Energy Controller v0.0.1 · Datenquellen
+# SQL-Cache und PV-Tageszähler; keine Steuerentscheidung.
+
+command_line:
+  - sensor:
+      name: "SE NF Load Forecast 7d Cached"
+      unique_id: se_nf_load_forecast_7d_cached
+      command: >-
+        python3 /config/se_nf_load_forecast_7d_cached.py
+        --db "{{ states('input_text.se_nf_sql_db_path') | trim }}"
+        --entity "{{ states('input_text.se_nf_daily_consumption_entity') | trim }}"
+      command_timeout: 30
+      scan_interval: 86400
+      unit_of_measurement: "kWh"
+      value_template: "{{ value_json.remaining | float(0) }}"
+      json_attributes:
+        - until_now
+        - avg_day_total
+        - min_remaining
+        - max_remaining
+        - days
+        - samples_total
+        - valid
+        - source
+        - duration_ms
+        - error
+  # MIGRATED_FROM: packages/se_nf_10_dynamic_night_forecast.yaml
+  - sensor:
+      name: "SE NF Night Consumption 7d Dynamic"
+      unique_id: se_nf_night_consumption_7d_dynamic
+      command: >-
+        python3 /config/se_nf_night_forecast_7d.py
+        --db "{{ states(
+          'input_text.se_nf_sql_db_path'
+        ) | trim }}"
+        --entity "{{ states(
+          'input_text.se_nf_daily_consumption_entity'
+        ) | trim }}"
+        --start-hour "{{ states(
+          'input_number.se_nf_lifetime_latest_finish_hour'
+        ) | float(18.5) }}"
+        --end-hour "{{ states(
+          'sensor.se_nf_dynamic_night_end_hour'
+        ) | float(8.0) }}"
+        --morning-checkpoint-hour 6.0
+        --timezone "{{ now().tzinfo }}"
+        --unit "{{ state_attr(
+          states(
+            'input_text.se_nf_daily_consumption_entity'
+          ) | trim,
+          'unit_of_measurement'
+        ) | default('kWh', true) }}"
+        --fallback "{{ states(
+          'input_number.se_nf_lifetime_night_fallback_kwh'
+        ) | float(4.5) }}"
+        --minimum-nights 3
+        --history-days 14
+      command_timeout: 30
+      scan_interval: 3600
+      unit_of_measurement: "kWh"
+      device_class: energy
+      value_template: >-
+        {{ value_json.value_kwh | float(0) | round(2) }}
+      json_attributes:
+        - valid
+        - source
+        - valid_nights
+        - minimum_kwh
+        - maximum_kwh
+        - mean_kwh
+        - median_kwh
+        - p80_kwh
+        - window_start
+        - window_end
+        - morning_checkpoint
+        - morning_window_hours
+        - morning_valid_nights
+        - morning_median_kwh
+        - morning_p80_kwh
+        - night_values
+        - morning_values
+        - error
+
+  - sensor:
+      name: "SE NF Daytime Consumption 7d Dynamic"
+      unique_id: se_nf_daytime_consumption_7d_dynamic
+      command: >-
+        python3 /config/se_nf_daytime_forecast_7d.py
+        --db "{{ states('input_text.se_nf_sql_db_path') | trim }}"
+        --entity "{{ states('input_text.se_nf_daily_consumption_entity') | trim }}"
+        --start-hour "{{ states('sensor.se_nf_dynamic_night_end_hour') | float(8.0) }}"
+        --end-hour "{{ states('input_number.se_nf_lifetime_latest_finish_hour') | float(18.5) }}"
+        --timezone "{{ now().tzinfo }}"
+        --unit "{{ state_attr(states('input_text.se_nf_daily_consumption_entity') | trim, 'unit_of_measurement') | default('kWh', true) }}"
+        --minimum-days 3
+        --history-days 14
+      command_timeout: 30
+      scan_interval: 3600
+      unit_of_measurement: "kWh"
+      device_class: energy
+      value_template: "{{ value_json.value_kwh | float(0) | round(2) }}"
+      json_attributes:
+        - valid
+        - source
+        - valid_days
+        - minimum_kwh
+        - maximum_kwh
+        - mean_kwh
+        - median_kwh
+        - window_start
+        - window_end
+        - day_values
+        - error
+
+utility_meter:
+  se_nf_pv_actual_today_meter:
+    source: sensor.se_nf_pv_actual_meter_source_energy
+    cycle: daily
+
+# MIGRATED_FROM: packages/se_nf_10_dynamic_night_forecast.yaml
+input_number:
+  se_nf_lifetime_pv_ready_after_sunrise_min:
+    name: "Akku schonen: PV nutzbar nach Sonnenaufgang"
+    min: 0
+    max: 240
+    step: 15
+    initial: 120
+    mode: slider
+    unit_of_measurement: "min"
+    icon: mdi:weather-sunset-up
+
+# MIGRATED_FROM: packages/se_nf_10_dynamic_night_forecast.yaml
+template:
+  - sensor:
+      - name: "SE NF Dynamic Night End Hour"
+        unique_id: se_nf_dynamic_night_end_hour
+        unit_of_measurement: "h"
+        icon: mdi:weather-sunset-up
+        state: >-
+          {% set rising_raw =
+            state_attr('sun.sun', 'next_rising') %}
+          {% set offset =
+            states(
+              'input_number.se_nf_lifetime_pv_ready_after_sunrise_min'
+            ) | int(120) %}
+          {% if rising_raw %}
+            {% set ready =
+              as_local(as_datetime(rising_raw))
+              + timedelta(minutes=offset) %}
+            {% set decimal =
+              ready.hour + (ready.minute / 60) %}
+            {{ [[decimal, 5.0] | max, 12.0] | min
+               | round(2) }}
+          {% else %}
+            8.0
+          {% endif %}
+        attributes:
+          next_rising: >-
+            {{ state_attr('sun.sun', 'next_rising') }}
+          offset_minutes: >-
+            {{ states(
+              'input_number.se_nf_lifetime_pv_ready_after_sunrise_min'
+            ) }}
+          rule: >-
+            next sunrise plus configured offset;
+            clamped to 05:00-12:00
+
+# MIGRATED_FROM: packages/se_nf_10_dynamic_night_forecast.yaml
+automation:
+  - id: se_nf_dynamic_consumption_history_refresh
+    alias: "SE NF - Dynamische Verbrauchshistorie aktualisieren"
+    description: >-
+      Aktualisiert die rein lesende Nacht- und Tagesauswertung nach dem
+      Start, taeglich und bei Aenderung ihrer gemeinsamen Zeitgrenze.
+    mode: restart
+    trigger:
+      - platform: homeassistant
+        event: start
+        id: startup
+
+      - platform: state
+        entity_id:
+          - sensor.se_nf_dynamic_night_end_hour
+          - input_number.se_nf_lifetime_pv_ready_after_sunrise_min
+          - input_number.se_nf_lifetime_latest_finish_hour
+        id: window_changed
+
+      - platform: time
+        at: "00:10:00"
+        id: daily
+
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: startup
+            sequence:
+              - delay: "00:03:00"
+        default:
+          - delay: "00:00:05"
+
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.se_nf_night_consumption_7d_dynamic
+            - sensor.se_nf_daytime_consumption_7d_dynamic
