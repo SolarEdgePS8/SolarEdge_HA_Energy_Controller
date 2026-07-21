@@ -12,12 +12,16 @@ RUNTIME_MANIFEST=".se_controller_runtime_manifest.json"
 log() { printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
 rollback_now() {
+  code=$?
+  trap - ERR
   log "Installation fehlgeschlagen. Automatischer Rollback."
   bash "$ROOT/scripts/rollback.sh" "$BACKUP" || true
+  exit "$code"
 }
 
 mkdir -p "$BACKUP/content" "$CONFIG/packages"
 : >"$ACTIONS"
+trap rollback_now ERR
 
 SE_CONTROLLER_DRY_RUN="${SE_CONTROLLER_DRY_RUN:-0}" \
   python3 "$ROOT/scripts/apply_site_config.py" --master-off-only
@@ -68,20 +72,28 @@ for path in sorted((root / "package").glob("*.yaml")):
 for directory in (root / "scripts" / "runtime", root / "audit" / "runtime"):
     for path in sorted(directory.glob("*.py")):
         installed[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+version = "0.1.0-rc.3"
+source_commit = None
+release_manifest = root / "validation" / "release_manifest.json"
+if release_manifest.is_file():
+    release_data = json.loads(release_manifest.read_text(encoding="utf-8"))
+    version = str(release_data.get("version") or version)
+    source_commit = release_data.get("source_commit")
+
 target.write_text(json.dumps({
     "project": "SolarEdge_HA_Energy_Controller",
-    "version": "0.1.0-rc.2",
+    "version": version,
+    "source_commit": source_commit,
     "installed_files": installed,
 }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
 printf '%s\n' "$BACKUP" >"$SHARE/se_controller_last_backup.txt"
 
-if ! ha core check; then
-  rollback_now
-  exit 2
-fi
+ha core check
 
+trap - ERR
 log "Installationsdateien und HA-Konfiguration geprüft."
 log "Backup: $BACKUP"
 log "Controller-Master bleibt AUS."
