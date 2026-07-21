@@ -11,11 +11,19 @@ Ein portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher. Das Pro
 
 ## Status
 
-**Version: `v0.1.0-rc.2` – Release Candidate**
+**Version: `v0.1.0-rc.3` – Release Candidate / Prerelease**
 
-Der Stand wurde auf einer Referenzinstallation migriert, neu gestartet, zehn Minuten überwacht und mit einem realen Charge-Writer-Rundlauf `0 W → 5000 W → 0 W` geprüft. Zusätzlich prüfen GitHub Actions YAML-Struktur, Python- und Shell-Syntax, Portabilität, Writer-Gates, Modusverträge und das erzeugte Release-Archiv.
+RC3 behebt falsche EVOpt-Rückfälle an 15-Minuten-Slotwechseln. Die Suggestion des letzten Solver-Laufs wird nur verwendet, solange sie zum aktuellen Planabschnitt passt; danach ist der vollständig validierte aktuelle Slot maßgeblich.
 
-Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarEdge-Modelle, Integrationen und Entity-Namen müssen über das Site-Mapping angepasst werden.
+Der Stand wurde auf einer Referenzinstallation installiert und mit folgenden Prüfungen bestätigt:
+
+- 18 Package-YAML-Dateien und fünf Runtime-/Audit-Dateien installiert;
+- `ha core check`, Config Check und Sanity Check erfolgreich;
+- Runtime-Manifest und alle 23 installierten Projektdateien per SHA256 geprüft;
+- reale EVOpt-Slotwechsel ohne Ausfall von `active_control` und ohne unnötigen 0/5000-W-Fallback;
+- GitHub Actions mit Release-Gate, Syntax-, Vertrags-, ZIP- und Manifestprüfung.
+
+Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarEdge-Modelle, Integrationen und Entity-Namen müssen über das Site-Mapping angepasst und auf der jeweiligen Anlage geprüft werden.
 
 ## Was enthalten ist
 
@@ -24,42 +32,69 @@ Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarE
 - zentrale Safety- und Arbiter-Logik;
 - genau ein Writer je gemapptem SolarEdge-Ziel;
 - Installation, Update, Migration und vollständiger Rollback;
-- Runtime- und Konfliktprüfung;
+- Runtime-, Datei- und Konfliktprüfung;
 - optionale Wetter-, SQL-, evcc- und EVOpt-Anbindung;
-- Dokumentation für Einsteiger und technische Referenz.
+- Dokumentation für Erstinstallation und Update.
 
 ## Was nicht enthalten ist
 
 Keine privaten Fahrzeug-, Wallbox-, Wärmepumpen-, Shelly-, Strompreis-, Backup-Reserve- oder Akku-Saver-Automationen. Solche Systeme können nur über neutrale optionale Eingangssignale angebunden werden.
 
-## Schnellstart
+## Schnellstart für eine Erstinstallation
 
-1. Home-Assistant-Backup erstellen.
-2. Release-ZIP nach `/share` kopieren und entpacken.
-3. Im entpackten Projektordner ausführen:
+Voraussetzung: Home Assistant OS oder Supervised mit Terminal-/SSH-Zugriff, aktivierten Packages und einem vollständigen Backup.
+
+1. Die beiden Release-Dateien nach `/share` kopieren:
+
+   ```text
+   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
+   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
+   ```
+
+2. Release-Prüfsumme kontrollieren und entpacken:
+
+   ```bash
+   cd /share
+   sha256sum -c SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
+   unzip -q SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
+   cd /share/SolarEdge_HA_Energy_Controller
+   ```
+
+   Erwartet:
+
+   ```text
+   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip: OK
+   ```
+
+3. Controller-Dateien installieren:
 
    ```bash
    bash scripts/install_package.sh
+   ha core restart
    ```
 
-4. Home Assistant neu starten.
-5. `config/site_config.env.example` nach `config/site_config.env` kopieren.
-6. Eigene Entity-IDs eintragen und `SITE_CONFIG_CONFIRMED=YES` setzen.
-7. Mapping anwenden:
+4. Nach dem Neustart die private Standortkonfiguration erstellen:
+
+   ```bash
+   cp config/site_config.env.example config/site_config.env
+   ```
+
+   `config/site_config.env` mit den eigenen Entity-IDs bearbeiten und erst nach vollständiger Prüfung setzen:
+
+   ```dotenv
+   SITE_CONFIG_CONFIRMED=YES
+   ```
+
+5. Mapping anwenden und Erstprüfung starten:
 
    ```bash
    python3 scripts/apply_site_config.py config/site_config.env
-   ```
-
-8. Erstprüfung starten:
-
-   ```bash
    bash scripts/run_first_checks.sh
    ```
 
-9. Den Master `input_boolean.se_netzdienlich_enabled` erst einschalten, wenn alle Prüfungen `PASS` melden.
+6. Den Master `input_boolean.se_netzdienlich_enabled` erst einschalten, wenn die Erstprüfung mit `PASS=True` endet.
 
-Vollständige Anleitung: [Erstinstallation](docs/02_FIRST_INSTALL.md)
+Die vollständigen Schritte, Pflichtsensoren, EVOpt-Konfiguration, erwarteten Zustände und der Rollback stehen in der [Erstinstallation](docs/02_FIRST_INSTALL.md). Bestehende Installationen verwenden ausschließlich die [Update-Anleitung](docs/05_UPDATE.md).
 
 ## Dokumentation
 
@@ -96,7 +131,7 @@ Vollständige Anleitung: [Erstinstallation](docs/02_FIRST_INSTALL.md)
 - [Funktion der YAML-Dateien](docs/reference/01_YAML_FILES.md)
 - [Safety, Arbiter und Writer](docs/reference/02_SAFETY_ARBITER_WRITERS.md)
 - [Tests und Release-Gates](docs/reference/03_TESTS_AND_RELEASE_GATES.md)
-- [Technischer Status RC2](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
+- [Technischer Status RC3](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
 
 ## Sicherheit
 
@@ -105,7 +140,8 @@ Vollständige Anleitung: [Erstinstallation](docs/02_FIRST_INSTALL.md)
 - Leere optionale Writer-Mappings deaktivieren den jeweiligen Writer.
 - EVOpt schreibt nie direkt auf SolarEdge; der Adapter liefert nur eine Anforderung.
 - Fehlende oder ungültige EVOpt-Daten führen zum Fallback „Netzdienlich laden“.
-- Vor jedem Installations- oder Updatevorgang wird ein Backup erzeugt.
+- Vor jedem Installations- oder Updatevorgang wird ein dateibezogenes Backup erzeugt.
+- Weitere Automationen dürfen nicht auf dieselben gemappten SolarEdge-Ziele schreiben.
 
 ## Lizenz
 
