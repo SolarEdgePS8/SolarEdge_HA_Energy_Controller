@@ -13,6 +13,8 @@ CONTAINER="se-controller-ha-smoke-$$"
 START_EPOCH="$(date +%s)"
 mkdir -p "$CONFIG/packages" "$SHARE" "$ARTIFACTS"
 
+# Wird indirekt durch den EXIT-Trap aufgerufen.
+# shellcheck disable=SC2317
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   rm -rf "$TMP"
