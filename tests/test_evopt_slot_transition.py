@@ -95,8 +95,10 @@ def test_yaml_keeps_active_control_during_action_stabilization() -> None:
 
 def test_permissive_transitions_are_delayed_without_legacy_fallback() -> None:
     text = (ROOT / "package/se_controller_50_mode_evopt.yaml").read_text(encoding="utf-8")
-    assert "se_nf_evopt_charge_block_request" in text
-    assert "delay_off:\n          seconds: 60" in text
+    charge_block = text.split("- name: SE NF EVOpt Charge Block Request", 1)[1].split(
+        "- name: SE NF EVOpt Differs From Legacy", 1
+    )[0]
+    assert "delay_off:\n          seconds: 180" in charge_block
     assert "se_nf_evopt_grid_charge_request" in text
     assert "delay_on:\n          seconds: 60" in text
     assert "slot_override_suggestion_mismatch" in (
@@ -107,5 +109,6 @@ def test_permissive_transitions_are_delayed_without_legacy_fallback() -> None:
 def test_restrictive_holdcharge_is_immediate_even_before_helper_delay_updates() -> None:
     evopt = (ROOT / "package/se_controller_50_mode_evopt.yaml").read_text(encoding="utf-8")
     writer = (ROOT / "package/se_controller_80_charge_writer.yaml").read_text(encoding="utf-8")
-    assert "action_raw == 'holdcharge' or charge_block" in evopt
+    assert "selected == 'EVOpt optimiert' and charge_block" in evopt
+    assert "source == 'evopt' and action_raw == 'holdcharge'" in evopt
     assert "sensor.se_nf_evopt_action_raw') != 'holdcharge'" in writer
