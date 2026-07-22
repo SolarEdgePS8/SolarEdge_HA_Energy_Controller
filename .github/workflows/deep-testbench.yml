@@ -80,7 +80,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
-      - name: Fixed scenarios, property tests and fake-time state machines
+      - name: Fixed scenarios, property tests, fake-time and measured-day replay
         run: bash scripts/run_deep_tests.sh model
       - uses: actions/upload-artifact@v6
         if: always()
@@ -128,6 +128,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  real-day-24h:
+    name: main-production-real-day-24h
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Prove production controller parity with main
+        run: |
+          set -Eeuo pipefail
+          git fetch origin main --depth=1
+          git diff --exit-code origin/main...HEAD -- \
+            package \
+            custom_components/se_write_watchdog \
+            scripts/install_package.sh \
+            scripts/runtime \
+            audit/runtime
+      - name: Replay one measured day through all four modes in Home Assistant
+        env:
+          HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
+          HA_START_TIMEOUT: "180"
+          HA_24H_REPLAY_TIMEOUT: "480"
+        run: bash scripts/run_ha_24h_replay.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: real-day-24h-${{ github.sha }}
+          path: artifacts/ha-24h
+          if-no-files-found: error
+          retention-days: 30
+
   release-installation:
     name: release-installer-rollback
     runs-on: ubuntu-latest
@@ -167,6 +199,7 @@ jobs:
       - model
       - fake-evcc
       - home-assistant-smoke
+      - real-day-24h
       - release-installation
     runs-on: ubuntu-latest
     steps:
@@ -177,14 +210,16 @@ jobs:
           MODEL: ${{ needs.model.result }}
           EVCC: ${{ needs.fake-evcc.result }}
           HA: ${{ needs.home-assistant-smoke.result }}
+          REAL_DAY: ${{ needs.real-day-24h.result }}
           RELEASE: ${{ needs.release-installation.result }}
         run: |
           set -Eeuo pipefail
-          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nrelease=%s\n' \
-            "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$RELEASE"
+          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nreal_day=%s\nrelease=%s\n' \
+            "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$REAL_DAY" "$RELEASE"
           test "$CODESPACES" = success
           test "$STATIC" = success
           test "$MODEL" = success
           test "$EVCC" = success
           test "$HA" = success
+          test "$REAL_DAY" = success
           test "$RELEASE" = success
