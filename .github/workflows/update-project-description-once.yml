@@ -1,0 +1,82 @@
+name: Update project description once
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'docs/project-description-and-migration'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout documentation branch
+        uses: actions/checkout@v4
+        with:
+          ref: docs/project-description-and-migration
+          fetch-depth: 0
+
+      - name: Add successor and migration description
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+
+          old_intro = (
+              'Ein portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher. '
+              'Planung, Sicherheitsprüfung und Schreibzugriffe sind getrennt. '
+              'Der Controller unterstützt vier Betriebsarten:\n'
+          )
+          new_intro = (
+              'Portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher mit vier Modi, '
+              'EVCC Optimizer, zentralem Safety-Arbiter, genau einem Writer je SolarEdge-Ziel '
+              'und einem read-only Write-Watchdog. Planung, Sicherheitsprüfung und '
+              'Schreibzugriffe sind klar voneinander getrennt.\n\n'
+              '> **Aktives Nachfolgeprojekt:** Dieses Repository ersetzt '
+              '[`Solaredge_Netzdienlich`](https://github.com/SolarEdgePS8/Solaredge_Netzdienlich). '
+              'Das alte Repository bleibt nur zur historischen Nachvollziehbarkeit erhalten. '
+              'Bestehende Nutzer verwenden die '
+              '[Migrationsanleitung](docs/11_MIGRATION_FROM_NETZDIENLICH.md).\n\n'
+              'Der Controller unterstützt vier Betriebsarten:\n'
+          )
+
+          if old_intro in text:
+              text = text.replace(old_intro, new_intro, 1)
+          elif 'docs/11_MIGRATION_FROM_NETZDIENLICH.md' not in text:
+              raise SystemExit('Erwarteter README-Einstieg wurde nicht gefunden.')
+
+          old_link = '- [Migration](docs/06_MIGRATION.md)\n'
+          new_link = (
+              '- [Migration](docs/06_MIGRATION.md)\n'
+              '- [Migration aus Solaredge_Netzdienlich]'
+              '(docs/11_MIGRATION_FROM_NETZDIENLICH.md)\n'
+          )
+          if old_link in text and 'Migration aus Solaredge_Netzdienlich' not in text:
+              text = text.replace(old_link, new_link, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/update-project-description-once.yml
+
+      - name: Commit README update and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md .github/workflows/update-project-description-once.yml
+          if git diff --cached --quiet; then
+            echo 'No changes required.'
+            exit 0
+          fi
+          git commit -m 'Docs: Projektbeschreibung und Migration im README ergänzen'
+          git push origin HEAD:docs/project-description-and-migration
