@@ -1,0 +1,43 @@
+name: Apply deep testbench once
+
+on:
+  push:
+    branches:
+      - test/deep-codespaces-testbench
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout testbench branch
+        uses: actions/checkout@v6
+        with:
+          ref: test/deep-codespaces-testbench
+
+      - name: Decode and apply testbench payload
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cat .deep-testbench-payload/chunk_*.b64 > /tmp/deep-testbench.b64
+          base64 -d /tmp/deep-testbench.b64 > /tmp/deep-testbench.zip
+          unzip -t /tmp/deep-testbench.zip
+          unzip -oq /tmp/deep-testbench.zip -d .
+          rm -rf .deep-testbench-payload
+          rm -f .github/workflows/apply-deep-testbench-once.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+
+      - name: Commit complete testbench
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Test: Codespaces und mehrstufigen Deep Testbench ergänzen"
+          git push origin HEAD:test/deep-codespaces-testbench
