@@ -15,6 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  codespaces-devcontainer:
+    name: codespaces-devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the Codespaces-compatible dev container and run its test entrypoint
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: bash scripts/run_deep_tests.sh all
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: codespaces-devcontainer-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 30
+
   static:
     name: static-architecture
     runs-on: ubuntu-latest
@@ -129,6 +148,7 @@ jobs:
     name: deep-release-gate
     if: always()
     needs:
+      - codespaces-devcontainer
       - static
       - model
       - fake-evcc
@@ -138,6 +158,7 @@ jobs:
     steps:
       - name: Require all deep test stages
         env:
+          CODESPACES: ${{ needs.codespaces-devcontainer.result }}
           STATIC: ${{ needs.static.result }}
           MODEL: ${{ needs.model.result }}
           EVCC: ${{ needs.fake-evcc.result }}
@@ -145,8 +166,9 @@ jobs:
           RELEASE: ${{ needs.release-installation.result }}
         run: |
           set -Eeuo pipefail
-          printf 'static=%s\nmodel=%s\nevcc=%s\nha=%s\nrelease=%s\n' \
-            "$STATIC" "$MODEL" "$EVCC" "$HA" "$RELEASE"
+          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nrelease=%s\n' \
+            "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$RELEASE"
+          test "$CODESPACES" = success
           test "$STATIC" = success
           test "$MODEL" = success
           test "$EVCC" = success
