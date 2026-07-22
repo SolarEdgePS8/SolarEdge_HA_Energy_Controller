@@ -1,0 +1,64 @@
+name: Debug RC4 installer
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  debug-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer diagnostics
+        id: install
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          exec > >(tee /tmp/installer-debug.log) 2>&1
+          set -x
+          TMP="$(mktemp -d)"
+          CONFIG="$TMP/config"
+          SHARE="$TMP/share"
+          mkdir -p "$CONFIG/packages" "$SHARE"
+          cat > "$CONFIG/configuration.yaml" <<'YAML'
+          homeassistant:
+            packages: !include_dir_named packages
+          YAML
+          cp "$CONFIG/configuration.yaml" "$TMP/configuration.original.yaml"
+
+          CONFIG_ROOT="$CONFIG" SHARE_ROOT="$SHARE" SE_CONTROLLER_DRY_RUN=1 HA_CHECK_COMMAND=true \
+            bash scripts/install_package.sh
+          rc=$?
+          echo "INSTALL_RC=$rc"
+          echo "--- FILES ---"
+          find "$CONFIG" -type f -printf '%P\n' | sort
+          echo "--- CONFIGURATION ---"
+          cat "$CONFIG/configuration.yaml" || true
+          echo "--- MANIFEST ---"
+          cat "$CONFIG/.se_controller_runtime_manifest.json" || true
+          if [ -f "$CONFIG/.se_controller_runtime_manifest.json" ]; then
+            python - "$CONFIG" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+          config = Path(sys.argv[1])
+          manifest = json.loads((config / '.se_controller_runtime_manifest.json').read_text())
+          print('VERSION', manifest.get('version'))
+          print('COUNT', len(manifest.get('installed_files', {})))
+          for rel, expected in manifest.get('installed_files', {}).items():
+              p = config / rel
+              print(rel, p.exists(), hashlib.sha256(p.read_bytes()).hexdigest() == expected if p.exists() else False)
+          PY
+          fi
+          exit "$rc"
+      - name: Upload installer diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc4-installer-debug
+          path: /tmp/installer-debug.log
+          if-no-files-found: error
+      - name: Fail when installer failed
+        if: steps.install.outcome != 'success'
+        run: exit 1
