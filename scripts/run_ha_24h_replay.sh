@@ -46,6 +46,15 @@ se_test_replay:
   output_dir: /config/se_24h_results
 YAML
 
+# Home Assistant 2026.7 no longer exports this historical test-event constant.
+# The replay uses the unchanged event name only inside the isolated container.
+cat > "$CONFIG/sitecustomize.py" <<'PY'
+import homeassistant.const as const
+
+if not hasattr(const, "EVENT_TIME_CHANGED"):
+    const.EVENT_TIME_CHANGED = "time_changed"
+PY
+
 CONFIG_ROOT="$CONFIG" \
 SHARE_ROOT="$SHARE" \
 SE_CONTROLLER_DRY_RUN=1 \
@@ -62,6 +71,7 @@ cp -a "$ROOT/testbench/custom_components/se_test_replay" \
 
 # Validate the exact installed main production packages plus the test-only replay.
 docker run --rm \
+  -e PYTHONPATH=/config \
   --entrypoint python \
   -v "$CONFIG:/config" \
   "$HA_IMAGE" \
@@ -69,6 +79,7 @@ docker run --rm \
   2>&1 | tee "$ARTIFACTS/check-config.log"
 
 docker run -d \
+  -e PYTHONPATH=/config \
   --name "$CONTAINER" \
   -p "127.0.0.1:${PORT}:8123" \
   -v "$CONFIG:/config" \
