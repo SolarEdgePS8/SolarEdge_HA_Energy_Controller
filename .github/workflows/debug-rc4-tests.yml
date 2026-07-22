@@ -1,0 +1,22 @@
+name: Debug RC4 tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  debug-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run first failing test
+        shell: bash
+        run: |
+          set +e
+          python -m pip install -q --disable-pip-version-check -r requirements-dev.txt >/dev/null 2>&1
+          pytest -x -vv -p no:cacheprovider > /tmp/pytest.log 2>&1
+          rc=$?
+          cat /tmp/pytest.log
+          exit "$rc"
