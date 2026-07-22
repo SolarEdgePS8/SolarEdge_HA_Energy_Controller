@@ -1,4 +1,4 @@
-name: Set repository About once
+name: Cleanup temporary About branch
 
 on:
   pull_request:
@@ -8,21 +8,19 @@ permissions:
   contents: write
 
 jobs:
-  set-about:
+  cleanup:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.head_ref == 'maintenance/set-repository-about'
     runs-on: ubuntu-latest
     steps:
-      - name: Set repository description and homepage
+      - name: Delete temporary branch
         env:
           GH_TOKEN: ${{ github.token }}
-          DESCRIPTION: Portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher mit vier Modi, EVCC Optimizer, Safety-Arbiter, Single Writer und Write-Watchdog.
-          HOMEPAGE: https://github.com/SolarEdgePS8/SolarEdge_HA_Energy_Controller
+          BRANCH: maintenance/set-repository-about
         run: |
           set -euo pipefail
           gh api \
-            --method PATCH \
-            "repos/${GITHUB_REPOSITORY}" \
-            -f description="$DESCRIPTION" \
-            -f homepage="$HOMEPAGE"
+            --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}"
+          echo "Deleted temporary branch ${BRANCH}."
