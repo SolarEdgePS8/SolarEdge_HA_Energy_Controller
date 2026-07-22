@@ -1,0 +1,118 @@
+# Test-only package for the deterministic 24-hour Home Assistant replay.
+# It is never copied by the public installer and has no physical integration.
+input_number:
+  se_replay_charge_limit_backing:
+    name: SE Replay Charge Limit Backing
+    min: 0
+    max: 5000
+    step: 1
+    initial: 0
+    unit_of_measurement: W
+  se_replay_battery_soc:
+    name: SE Replay Battery SoC
+    min: 0
+    max: 100
+    step: 0.001
+    initial: 44
+    unit_of_measurement: "%"
+  se_replay_battery_capacity:
+    name: SE Replay Battery Capacity
+    min: 1
+    max: 50
+    step: 0.1
+    initial: 24.3
+    unit_of_measurement: kWh
+  se_replay_pv_power:
+    name: SE Replay PV Power
+    min: 0
+    max: 30000
+    step: 1
+    initial: 0
+    unit_of_measurement: W
+  se_replay_home_power:
+    name: SE Replay Home Power
+    min: 0
+    max: 30000
+    step: 1
+    initial: 350
+    unit_of_measurement: W
+  se_replay_pv_remaining:
+    name: SE Replay PV Forecast Remaining
+    min: 0
+    max: 100
+    step: 0.001
+    initial: 52.491
+    unit_of_measurement: kWh
+  se_replay_pv_total:
+    name: SE Replay PV Forecast Total
+    min: 0
+    max: 100
+    step: 0.001
+    initial: 52.491
+    unit_of_measurement: kWh
+  se_replay_pv_tomorrow:
+    name: SE Replay PV Forecast Tomorrow
+    min: 0
+    max: 100
+    step: 0.001
+    initial: 31.943
+    unit_of_measurement: kWh
+
+template:
+  - number:
+      - name: Test Storage Charge Limit
+        unique_id: se_replay_storage_charge_limit
+        unit_of_measurement: W
+        device_class: power
+        min: 0
+        max: 5000
+        step: 1
+        state: "{{ states('input_number.se_replay_charge_limit_backing') }}"
+        set_value:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.se_replay_charge_limit_backing
+            data:
+              value: "{{ value }}"
+  - sensor:
+      - name: Test Battery SoC
+        unique_id: se_replay_battery_soc
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_battery_soc') }}"
+      - name: Test Battery Capacity
+        unique_id: se_replay_battery_capacity
+        unit_of_measurement: kWh
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_battery_capacity') }}"
+      - name: Test PV Power
+        unique_id: se_replay_pv_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_pv_power') }}"
+      - name: Test Home Power
+        unique_id: se_replay_home_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_home_power') }}"
+      - name: Test PV Remaining
+        unique_id: se_replay_pv_remaining
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_pv_remaining') }}"
+      - name: Test PV Total
+        unique_id: se_replay_pv_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_pv_total') }}"
+      - name: Test PV Tomorrow
+        unique_id: se_replay_pv_tomorrow
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_replay_pv_tomorrow') }}"
