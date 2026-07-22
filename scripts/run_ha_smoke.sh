@@ -103,3 +103,7 @@ report = {
 path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(json.dumps(report, indent=2))
 PY
+
+# Verhindert, dass ein vorangegangener absichtlich negativer grep-Status den
+# erfolgreichen Smoke-Test als Shell-Fehler nach außen trägt.
+exit 0
