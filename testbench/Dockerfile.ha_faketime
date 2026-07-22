@@ -13,7 +13,7 @@ RUN set -eux; \
       echo 'Unsupported Home Assistant base image: no apk or apt-get' >&2; \
       exit 1; \
     fi; \
-    lib="$(find /usr -type f \( -name 'libfaketimeMT.so.1' -o -name 'libfaketime.so.1' \) -print | head -n 1)"; \
+    lib="$(find /usr -type f \( -name 'libfaketimeMT.so.1' -o -name 'libfaketime.so.1' \) -print -quit)"; \
     test -n "$lib"; \
     ln -sf "$lib" /usr/local/lib/libfaketime.so.1; \
     /bin/sh -c 'LD_PRELOAD=/usr/local/lib/libfaketime.so.1 FAKETIME="2000-01-01 00:00:00" date +%Y-%m-%d' | grep -qx 2000-01-01
