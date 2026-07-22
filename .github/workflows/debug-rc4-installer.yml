@@ -11,14 +11,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run installer diagnostics
-        id: install
+      - name: Run complete installer and rollback diagnostics
+        id: simulation
         continue-on-error: true
         shell: bash
         run: |
           set +e
           exec > >(tee /tmp/installer-debug.log) 2>&1
           set -x
+          failure=0
+          check() {
+            label="$1"
+            shift
+            "$@"
+            rc=$?
+            echo "CHECK $label RC=$rc"
+            if [ "$rc" -ne 0 ]; then failure=1; fi
+          }
+
           TMP="$(mktemp -d)"
           CONFIG="$TMP/config"
           SHARE="$TMP/share"
@@ -29,36 +39,88 @@ jobs:
           YAML
           cp "$CONFIG/configuration.yaml" "$TMP/configuration.original.yaml"
 
+          echo '=== FIRST INSTALL ==='
           CONFIG_ROOT="$CONFIG" SHARE_ROOT="$SHARE" SE_CONTROLLER_DRY_RUN=1 HA_CHECK_COMMAND=true \
             bash scripts/install_package.sh
-          rc=$?
-          echo "INSTALL_RC=$rc"
-          echo "--- FILES ---"
-          find "$CONFIG" -type f -printf '%P\n' | sort
-          echo "--- CONFIGURATION ---"
-          cat "$CONFIG/configuration.yaml" || true
-          echo "--- MANIFEST ---"
-          cat "$CONFIG/.se_controller_runtime_manifest.json" || true
-          if [ -f "$CONFIG/.se_controller_runtime_manifest.json" ]; then
-            python - "$CONFIG" <<'PY'
+          install_rc=$?
+          echo "FIRST_INSTALL_RC=$install_rc"
+          [ "$install_rc" -eq 0 ] || failure=1
+
+          python - "$CONFIG" <<'PY'
           import hashlib, json, sys
           from pathlib import Path
           config = Path(sys.argv[1])
           manifest = json.loads((config / '.se_controller_runtime_manifest.json').read_text())
-          print('VERSION', manifest.get('version'))
-          print('COUNT', len(manifest.get('installed_files', {})))
-          for rel, expected in manifest.get('installed_files', {}).items():
-              p = config / rel
-              print(rel, p.exists(), hashlib.sha256(p.read_bytes()).hexdigest() == expected if p.exists() else False)
+          assert manifest['project'] == 'SolarEdge_HA_Energy_Controller'
+          assert manifest['version'] == '0.1.0-rc.4'
+          assert len(manifest['installed_files']) == 28, manifest
+          for rel, expected in manifest['installed_files'].items():
+              path = config / rel
+              assert path.is_file(), rel
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, rel
+          configuration = (config / 'configuration.yaml').read_text()
+          assert configuration.count('\nse_write_watchdog:\n') == 1, configuration
+          print('PYTHON_INSTALL_ASSERTIONS=PASS')
           PY
-          fi
-          exit "$rc"
+          py_rc=$?
+          echo "PYTHON_INSTALL_ASSERTIONS_RC=$py_rc"
+          [ "$py_rc" -eq 0 ] || failure=1
+
+          echo '=== EXISTING INSTALL WITHOUT TOKEN ==='
+          CONFIG_ROOT="$CONFIG" SHARE_ROOT="$SHARE" HA_CHECK_COMMAND=true \
+            bash scripts/install_package.sh
+          gate_rc=$?
+          echo "EXISTING_INSTALL_GATE_RC=$gate_rc"
+          if [ "$gate_rc" -eq 0 ]; then failure=1; fi
+
+          echo '=== MANUAL ROLLBACK ==='
+          CONFIG_ROOT="$CONFIG" SHARE_ROOT="$SHARE" SE_CONTROLLER_DRY_RUN=1 HA_CHECK_COMMAND=true \
+            bash scripts/rollback.sh
+          rollback_rc=$?
+          echo "MANUAL_ROLLBACK_RC=$rollback_rc"
+          [ "$rollback_rc" -eq 0 ] || failure=1
+          find "$CONFIG" -type f -printf 'AFTER_ROLLBACK %P\n' | sort
+          if find "$CONFIG/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit | grep -q .; then echo 'PACKAGE_FILES_REMAIN'; failure=1; fi
+          [ ! -f "$CONFIG/.se_controller_runtime_manifest.json" ] || { echo 'MANIFEST_REMAINS'; failure=1; }
+          [ ! -f "$CONFIG/custom_components/se_write_watchdog/__init__.py" ] || { echo 'WATCHDOG_REMAINS'; failure=1; }
+          [ ! -f "$CONFIG/se_write_watchdog_tools/report.sh" ] || { echo 'TOOLS_REMAIN'; failure=1; }
+          cmp "$CONFIG/configuration.yaml" "$TMP/configuration.original.yaml"
+          cmp_rc=$?
+          echo "CONFIG_RESTORE_CMP_RC=$cmp_rc"
+          [ "$cmp_rc" -eq 0 ] || failure=1
+
+          echo '=== AUTOMATIC FAILURE ROLLBACK ==='
+          CONFIG2="$TMP/config_failure"
+          SHARE2="$TMP/share_failure"
+          mkdir -p "$CONFIG2/packages" "$SHARE2"
+          cat > "$CONFIG2/configuration.yaml" <<'YAML'
+          homeassistant:
+            packages: !include_dir_named packages
+          YAML
+          cp "$CONFIG2/configuration.yaml" "$TMP/configuration2.original.yaml"
+          CONFIG_ROOT="$CONFIG2" SHARE_ROOT="$SHARE2" SE_CONTROLLER_DRY_RUN=1 HA_CHECK_COMMAND=false \
+            bash scripts/install_package.sh
+          failure_rc=$?
+          echo "FAILURE_INSTALL_RC=$failure_rc"
+          if [ "$failure_rc" -eq 0 ]; then failure=1; fi
+          find "$CONFIG2" -type f -printf 'AFTER_AUTO_ROLLBACK %P\n' | sort
+          if find "$CONFIG2/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit | grep -q .; then echo 'AUTO_PACKAGE_FILES_REMAIN'; failure=1; fi
+          [ ! -f "$CONFIG2/.se_controller_runtime_manifest.json" ] || { echo 'AUTO_MANIFEST_REMAINS'; failure=1; }
+          [ ! -f "$CONFIG2/custom_components/se_write_watchdog/__init__.py" ] || { echo 'AUTO_WATCHDOG_REMAINS'; failure=1; }
+          [ ! -f "$CONFIG2/se_write_watchdog_tools/report.sh" ] || { echo 'AUTO_TOOLS_REMAIN'; failure=1; }
+          cmp "$CONFIG2/configuration.yaml" "$TMP/configuration2.original.yaml"
+          cmp2_rc=$?
+          echo "AUTO_CONFIG_RESTORE_CMP_RC=$cmp2_rc"
+          [ "$cmp2_rc" -eq 0 ] || failure=1
+
+          echo "FINAL_FAILURE=$failure"
+          exit "$failure"
       - name: Upload installer diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: rc4-installer-debug
+          name: rc4-installer-debug-full
           path: /tmp/installer-debug.log
           if-no-files-found: error
-      - name: Fail when installer failed
-        if: steps.install.outcome != 'success'
+      - name: Fail when simulation failed
+        if: steps.simulation.outcome != 'success'
         run: exit 1
