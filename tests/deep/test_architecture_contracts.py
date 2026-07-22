@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -67,10 +68,36 @@ def test_writer_uses_90_second_permissive_trigger() -> None:
     assert text.count("service: number.set_value") == 1
 
 
-def test_no_private_ipv4_addresses_in_public_runtime_files() -> None:
+def test_24h_replay_assets_are_complete_and_test_only() -> None:
+    required = (
+        ROOT / "testbench/day_replay.py",
+        ROOT / "testbench/fixtures/real_day_2026-07-21_15m.json",
+        ROOT / "testbench/ha_24h_runtime_package.yaml",
+        ROOT / "testbench/custom_components/se_test_replay/__init__.py",
+        ROOT / "testbench/custom_components/se_test_replay/manifest.json",
+        ROOT / "scripts/run_ha_24h_replay.sh",
+        ROOT / "tests/deep/test_real_day_24h.py",
+    )
+    assert all(path.is_file() for path in required), [
+        str(path) for path in required if not path.is_file()
+    ]
+    fixture = json.loads(required[1].read_text(encoding="utf-8"))
+    assert fixture["slots"] == 96
+    assert fixture["cadence_minutes"] == 15
+    assert len(fixture["rows"]) == 96
+    assert fixture["evopt_timeline_kind"] == "synthetic_actions_on_real_measurements"
+
+
+def test_no_private_ipv4_addresses_or_credentials_in_public_runtime_files() -> None:
     private = re.compile(
         r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
         r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b"
+    )
+    credential_markers = (
+        '"access_token"',
+        '"refresh_token"',
+        "authorization: bearer",
+        "eyjhb",  # common JWT prefix; fixture/runtime must never contain live tokens
     )
     roots = [PACKAGE, ROOT / "scripts", ROOT / "custom_components", ROOT / "testbench"]
     violations: list[str] = []
@@ -79,6 +106,8 @@ def test_no_private_ipv4_addresses_in_public_runtime_files() -> None:
             continue
         for path in base.rglob("*"):
             if path.is_file() and path.suffix in {".py", ".sh", ".yaml", ".yml", ".json"}:
-                if private.search(path.read_text(encoding="utf-8", errors="replace")):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                lowered = text.lower()
+                if private.search(text) or any(marker in lowered for marker in credential_markers):
                     violations.append(str(path.relative_to(ROOT)))
     assert not violations
