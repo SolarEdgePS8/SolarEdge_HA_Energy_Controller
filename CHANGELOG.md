@@ -5,6 +5,11 @@
 - Installer-Backups werden mit einem eindeutigen `mktemp`-Suffix erzeugt; mehrere Installations- oder Rollbacktests innerhalb derselben Sekunde können sich nicht mehr gegenseitig überschreiben;
 - CI erzwingt denselben Zeitstempel für mehrere Installationsläufe und prüft die Kollisionssicherheit deterministisch;
 - GitHub Actions auf Node-24-fähige Versionen aktualisiert: `checkout@v6`, `setup-python@v6` und `upload-artifact@v6`;
+- Sensor- und Mapping-Dokumentation nach Herkunft, Bedeutung und Einheit erweitert: SolarEdge Modbus Multi, PV-Prognose, Wetter, evcc/ha-evcc sowie optionale Strompreis- und Kostenintegrationen;
+- read-only Mapping-Assistent erkennt und bewertet Kandidaten, unterstützt OS/Supervised/Container/Core sowie Offline-State-Dateien und erzeugt nur eine unbestätigte `site_config.env`;
+- Mapping-Assistent trägt LIVE-Leistung nur automatisch ein, wenn die Quelle bereits exakt `W` liefert; `kW`-Quellen bleiben als Konvertierungshinweis im Bericht;
+- neutrale, optionale YAML-Beispiele für PV-Filter, Leistung-zu-Energie, Tageszähler, Forecast-, evcc- und Strompreisadapter ergänzt;
+- Erstinstallation und Installer-Ausgabe um einen geführten Ablauf aus Installation, read-only Discovery, manueller Bestätigung, First Checks und später Master-Aktivierung ergänzt;
 - keine Änderungen an den 18 produktiven Package-YAMLs oder an der Controller-Laufzeitlogik.
 
 ## v0.1.0-rc.4
