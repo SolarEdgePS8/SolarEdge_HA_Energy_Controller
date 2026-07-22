@@ -4,8 +4,9 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${CONFIG_ROOT:-/config}"
 SHARE="${SHARE_ROOT:-/share}"
-STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
-BACKUP="$SHARE/se_controller_backup_$STAMP"
+STAMP="${SE_CONTROLLER_BACKUP_STAMP:-$(date -u '+%Y%m%dT%H%M%SZ')}"
+mkdir -p "$SHARE"
+BACKUP="$(mktemp -d "${SHARE%/}/se_controller_backup_${STAMP}_XXXXXX")"
 ACTIONS="$BACKUP/backup_actions.tsv"
 RUNTIME_MANIFEST=".se_controller_runtime_manifest.json"
 CONFIG_FILE="$CONFIG/configuration.yaml"
@@ -37,7 +38,7 @@ rollback_now() {
   exit 2
 }
 
-mkdir -p "$BACKUP/content" "$CONFIG/packages" "$SHARE"
+mkdir -p "$BACKUP/content" "$CONFIG/packages"
 : >"$ACTIONS"
 trap rollback_now ERR INT TERM
 
