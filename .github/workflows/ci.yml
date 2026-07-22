@@ -1,10 +1,9 @@
-name: Validate and publish RC3
+name: Validate and publish RC4
 
 on:
   push:
     branches:
       - main
-      - fix/rc3-release-hardening
   pull_request:
   workflow_dispatch:
 
@@ -28,7 +27,7 @@ jobs:
       - name: Install validation dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
-      - name: Read-only release gate
+      - name: Read-only release gate and live parity
         run: python audit/readonly_audit.py . --release-gate
 
       - name: Python syntax
@@ -36,19 +35,19 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          for root in [Path("audit"), Path("scripts"), Path("tests")]:
+          for root in [Path("audit"), Path("scripts"), Path("tests"), Path("custom_components")]:
               for path in root.rglob("*.py"):
                   compile(path.read_text(encoding="utf-8"), str(path), "exec")
           PY
 
       - name: Shell syntax
         shell: bash
-        run: find scripts audit -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+        run: find scripts audit tools -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
-      - name: Mode and writer contracts
+      - name: Mode, writer, watchdog and live-parity contracts
         run: pytest -q -p no:cacheprovider
 
-      - name: Installer portability, manifest and rollback simulation
+      - name: Installer portability, manifest, watchdog and rollback simulation
         shell: bash
         run: |
           set -euo pipefail
@@ -56,6 +55,11 @@ jobs:
           CONFIG="$TMP/config"
           SHARE="$TMP/share"
           mkdir -p "$CONFIG/packages" "$SHARE"
+          cat > "$CONFIG/configuration.yaml" <<'YAML'
+          homeassistant:
+            packages: !include_dir_named packages
+          YAML
+          cp "$CONFIG/configuration.yaml" "$TMP/configuration.original.yaml"
 
           CONFIG_ROOT="$CONFIG" \
           SHARE_ROOT="$SHARE" \
@@ -74,13 +78,21 @@ jobs:
               (config / ".se_controller_runtime_manifest.json").read_text(encoding="utf-8")
           )
           assert manifest["project"] == "SolarEdge_HA_Energy_Controller"
-          assert manifest["version"] == "0.1.0-rc.3"
-          assert len(manifest["installed_files"]) == 23, manifest
+          assert manifest["version"] == "0.1.0-rc.4"
+          assert len(manifest["installed_files"]) == 28, manifest
           for rel, expected in manifest["installed_files"].items():
               path = config / rel
               assert path.is_file(), rel
               assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, rel
-          print({"installed_files": 23, "hashes": "PASS"})
+
+          configuration = (config / "configuration.yaml").read_text(encoding="utf-8")
+          assert configuration.count("\nse_write_watchdog:\n") == 1, configuration
+          assert (config / "custom_components/se_write_watchdog/__init__.py").is_file()
+          assert (config / "custom_components/se_write_watchdog/manifest.json").is_file()
+          assert (config / "custom_components/se_write_watchdog/services.yaml").is_file()
+          assert (config / "se_write_watchdog_tools/report.sh").is_file()
+          assert (config / "se_write_watchdog_tools/watch.sh").is_file()
+          print({"installed_files": 28, "hashes": "PASS", "watchdog": "PASS"})
           PY
 
           # Bestehende Installation ohne Token muss vor Änderungen sicher abbrechen.
@@ -101,11 +113,19 @@ jobs:
             bash scripts/rollback.sh
           test -z "$(find "$CONFIG/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit)"
           test ! -f "$CONFIG/.se_controller_runtime_manifest.json"
+          test ! -f "$CONFIG/custom_components/se_write_watchdog/__init__.py"
+          test ! -f "$CONFIG/se_write_watchdog_tools/report.sh"
+          cmp "$CONFIG/configuration.yaml" "$TMP/configuration.original.yaml"
 
-          # Fehler in der HA-Prüfung muss automatisch zurückrollen.
+          # Fehler in der HA-Prüfung muss automatisch vollständig zurückrollen.
           CONFIG2="$TMP/config_failure"
           SHARE2="$TMP/share_failure"
           mkdir -p "$CONFIG2/packages" "$SHARE2"
+          cat > "$CONFIG2/configuration.yaml" <<'YAML'
+          homeassistant:
+            packages: !include_dir_named packages
+          YAML
+          cp "$CONFIG2/configuration.yaml" "$TMP/configuration2.original.yaml"
           set +e
           CONFIG_ROOT="$CONFIG2" \
           SHARE_ROOT="$SHARE2" \
@@ -117,16 +137,19 @@ jobs:
           test "$failure_rc" -ne 0
           test -z "$(find "$CONFIG2/packages" -maxdepth 1 -name 'se_controller_*.yaml' -print -quit)"
           test ! -f "$CONFIG2/.se_controller_runtime_manifest.json"
+          test ! -f "$CONFIG2/custom_components/se_write_watchdog/__init__.py"
+          test ! -f "$CONFIG2/se_write_watchdog_tools/report.sh"
+          cmp "$CONFIG2/configuration.yaml" "$TMP/configuration2.original.yaml"
 
       - name: Build release archive
-        run: bash scripts/build_release.sh dist 0.1.0-rc.3
+        run: bash scripts/build_release.sh dist 0.1.0-rc.4
 
       - name: Verify release ZIP and manifest
         shell: bash
         run: |
           set -euo pipefail
-          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip"
-          SHA="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256"
+          ZIP="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip"
+          SHA="dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256"
           test -f "$ZIP"
           test -f "$SHA"
           (cd dist && sha256sum -c "$(basename "$SHA")")
@@ -144,15 +167,20 @@ jobs:
               (root / "validation/release_manifest.json").read_text(encoding="utf-8")
           )
           assert manifest["project"] == "SolarEdge_HA_Energy_Controller"
-          assert manifest["version"] == "0.1.0-rc.3"
+          assert manifest["version"] == "0.1.0-rc.4"
           assert manifest.get("source_commit"), manifest
           assert (root / "scripts/lib/ha_environment.sh").is_file()
           assert (root / "docs/09_INSTALLATION_VARIANTS.md").is_file()
+          assert (root / "docs/10_WRITE_WATCHDOG.md").is_file()
+          assert (root / "custom_components/se_write_watchdog/__init__.py").is_file()
+          assert (root / "validation/live_package_sha256_rc4.json").is_file()
           print({
               "version": manifest["version"],
               "source_commit": manifest["source_commit"],
               "files": len(manifest["files"]),
               "portable_installer": True,
+              "watchdog": True,
+              "live_parity": True,
               "pass": True,
           })
           PY
@@ -160,15 +188,15 @@ jobs:
       - name: Upload tested release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.3
+          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.4
           path: |
-            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
-            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
+            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip
+            dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
           if-no-files-found: error
           retention-days: 30
 
   publish:
-    name: Publish v0.1.0-rc.3 prerelease
+    name: Publish v0.1.0-rc.4 prerelease
     needs: validate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -178,7 +206,7 @@ jobs:
       - name: Download tested release bundle
         uses: actions/download-artifact@v4
         with:
-          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.3
+          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.4
           path: release
 
       - name: Publish GitHub prerelease once
@@ -186,7 +214,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: v0.1.0-rc.3
+          TAG: v0.1.0-rc.4
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -194,42 +222,43 @@ jobs:
             exit 0
           fi
 
-          cat > release-notes.md <<'EOF'
-          ## SolarEdge HA Energy Controller v0.1.0-rc.3
+          cat > release-notes.md <<'NOTES'
+          ## SolarEdge HA Energy Controller v0.1.0-rc.4
 
-          RC3 verhindert falsche EVOpt-Fallbacks an regulären 15-Minuten-Slotwechseln und ergänzt präzise Übergangsdiagnosen.
+          RC4 verhindert unnötige `0 → 5000 → 0`-Schreibzyklen beim Home-Assistant-/EVOpt-Startup und veröffentlicht den auf der Referenzinstallation getesteten Write-Watchdog.
 
-          ### Unterstützte Installationen
+          ### Wesentliche Änderungen
 
-          - Home Assistant OS
-          - Home Assistant Supervised
-          - Home Assistant Container
-          - Home Assistant Core
+          - EVOpt-Startup-Handover hält den zuletzt bestätigten SolarEdge-Zustand;
+          - vollständiger Legacy-Fallback erst nach 20 Minuten durchgehendem EVOpt-Ausfall;
+          - `holdcharge` wirkt sofort und bleibt 180 Sekunden gelatcht;
+          - Freigabe auf 5000 W erst nach 90 Sekunden stabilem finalem Sollwert;
+          - nur der zentrale Charge-Limit-Writer schreibt;
+          - Master, Site-Bestätigung, EVOpt-Aktivierung und EVOpt-URL bleiben über Neustarts erhalten;
+          - Watchdog 1.0.2 protokolliert Service-Aufrufe, Context-Kette, Write-Intent, Zustandswechsel, Roundtrips und unerwartete Schreiber;
+          - alle 18 veröffentlichten Package-YAMLs sind per SHA256 byteidentisch mit dem geprüften Live-Export.
 
-          Für Container/Core werden lokale Pfade, ein Long-Lived Access Token und gegebenenfalls `HA_CHECK_COMMAND` benötigt.
-
-          ### Installation
+          ### Installation / Update
 
           1. ZIP und `.sha256` aus den Release-Assets in einen lokalen Arbeitsordner kopieren.
           2. Prüfsumme mit `sha256sum -c` kontrollieren.
           3. ZIP in einen leeren Ordner entpacken.
-          4. `bash scripts/install_package.sh` ausführen.
-          5. Home Assistant neu starten, `site_config.env` konfigurieren und `bash scripts/run_first_checks.sh` ausführen.
-          6. Den Controller-Master erst nach `PASS=True` einschalten.
+          4. Für eine neue Installation `bash scripts/install_package.sh` ausführen.
+          5. Für ein Update `bash scripts/update_package.sh` ausführen.
+          6. Home Assistant neu starten, Site-Konfiguration anwenden und `bash scripts/run_first_checks.sh` ausführen.
+          7. Den Controller-Master erst nach `PASS=True` einschalten.
 
-          ### evcc Optimizer
+          Der Installer installiert den Watchdog automatisch und sichert beziehungsweise entfernt ihn beim Rollback zusammen mit den Controller-Dateien.
 
-          evcc ist nur für `EVOpt optimiert` erforderlich. In `site_config.env` wird die evcc-Basis-URL ohne `/api/state` eingetragen. Der Adapter liest den Optimizer-Plan read-only; Safety, Arbiter und Writer bleiben vorgeschaltet.
+          Vollständige Anleitungen: `docs/02_FIRST_INSTALL.md`, `docs/05_UPDATE.md`, `docs/10_WRITE_WATCHDOG.md`.
 
-          Die vollständige Erstinstallation, Update-Anleitung und installationsspezifischen Befehle stehen unter `docs/02_FIRST_INSTALL.md`, `docs/05_UPDATE.md` und `docs/09_INSTALLATION_VARIANTS.md`.
-
-          Dieses Release ist ein Prerelease und noch kein stabiler v1.0-Stand.
-          EOF
+          Dieses Release ist weiterhin ein Prerelease und noch kein stabiler v1.0-Stand.
+          NOTES
 
           gh release create "$TAG" \
-            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip \
-            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256 \
+            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip \
+            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256 \
             --target "$GITHUB_SHA" \
-            --title "SolarEdge HA Energy Controller v0.1.0-rc.3" \
+            --title "SolarEdge HA Energy Controller v0.1.0-rc.4" \
             --notes-file release-notes.md \
             --prerelease

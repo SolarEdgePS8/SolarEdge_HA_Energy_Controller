@@ -5,11 +5,9 @@ input_boolean:
   se_nf_site_config_confirmed:
     name: "SolarEdge Energy Controller: Standortkonfiguration bestätigt"
     icon: mdi:shield-check
-    initial: false
   se_netzdienlich_enabled:
     name: "SolarEdge Energy Controller: Master"
     icon: mdi:transmission-tower
-    initial: false
   se_netzdienlich_debug:
     name: "SolarEdge: Netzdienlich V2.8 Debug"
     icon: mdi:bug-outline

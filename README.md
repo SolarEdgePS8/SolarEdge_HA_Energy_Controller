@@ -1,72 +1,76 @@
 # SolarEdge HA Energy Controller
 
-Ein portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher. Das Projekt trennt Planung, Sicherheitsprüfung und Schreibzugriffe in klaren Modulen und unterstützt vier Betriebsarten:
+Ein portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher. Planung, Sicherheitsprüfung und Schreibzugriffe sind getrennt. Der Controller unterstützt vier Betriebsarten:
 
 | Modus | Zweck |
 |---|---|
-| **Eigenverbrauch maximieren** | Akku für den normalen Eigenverbrauch freigeben |
+| **Eigenverbrauch maximieren** | Akku für normalen Eigenverbrauch freigeben |
 | **Netzdienlich laden** | PV-Ladung zeitlich planen und hohe Leistungsspitzen vermeiden |
 | **Akku schonen** | Ladeziel und Ladefenster aus Verbrauch, Reserve und Prognose ableiten |
-| **EVOpt optimiert** | gültige Vorgaben des evcc Optimizers übernehmen; bei Fehlern vollständig auf „Netzdienlich laden“ zurückfallen |
+| **EVOpt optimiert** | gültige Vorgaben des evcc Optimizers übernehmen; bei einem länger anhaltenden Fehler vollständig auf „Netzdienlich laden“ zurückfallen |
 
 ## Status
 
-**Version: `v0.1.0-rc.3` – Release Candidate / Prerelease**
+**Version: `v0.1.0-rc.4` – Release Candidate / Prerelease**
 
-RC3 behebt falsche EVOpt-Rückfälle an 15-Minuten-Slotwechseln. Die Suggestion des letzten Solver-Laufs wird nur verwendet, solange sie zum aktuellen Planabschnitt passt; danach ist der vollständig validierte aktuelle Slot maßgeblich.
+RC4 behebt unnötige Charge-Limit-Zyklen beim Home-Assistant-/EVOpt-Startup und veröffentlicht den auf der Referenzinstallation getesteten Write-Watchdog.
 
-Der Stand wurde auf einer Referenzinstallation installiert und mit folgenden Prüfungen bestätigt:
+Wesentliche Eigenschaften:
 
-- 18 Package-YAML-Dateien und fünf Runtime-/Audit-Dateien installiert;
-- Home-Assistant-Konfigurationsprüfung, Config Check und Sanity Check erfolgreich;
-- Runtime-Manifest und alle 23 installierten Projektdateien per SHA256 geprüft;
-- reale EVOpt-Slotwechsel ohne Ausfall von `active_control` und ohne unnötigen 0/5000-W-Fallback;
-- GitHub Actions mit Release-Gate, Syntax-, Vertrags-, Installer-, ZIP- und Manifestprüfung.
+- 18 portable Home-Assistant-Package-Dateien;
+- genau ein Writer je gemapptem SolarEdge-Ziel;
+- EVOpt-Startup-Handover hält bei kurzen Ausfällen den zuletzt bestätigten SolarEdge-Zustand;
+- vollständiger Legacy-Fallback erst nach 20 Minuten durchgehendem EVOpt-Ausfall;
+- `holdcharge` sperrt sofort und bleibt 180 Sekunden gelatcht;
+- Freigabe auf `5000 W` erst nach 90 Sekunden stabilem finalem Sollwert;
+- Master, Site-Bestätigung, EVOpt-Aktivierung und EVOpt-URL bleiben über Neustarts erhalten;
+- Write-Watchdog `1.0.2` mit Service-Trace, Context-Kette, Writer-Scan, Roundtrip- und EVOpt-Konsistenzprüfung;
+- Installation, Update und dateibezogener Rollback;
+- SHA256-Paritätsnachweis: alle 18 veröffentlichten YAML-Dateien sind byteidentisch mit dem geprüften Live-Export vom 22.07.2026.
 
 Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarEdge-Modelle, Integrationen und Entity-Namen müssen über das Site-Mapping angepasst und auf der jeweiligen Anlage geprüft werden.
 
 ## Was enthalten ist
 
-- 18 Home-Assistant-Package-Dateien;
+- 18 Controller-Package-YAMLs;
 - Entity-Mapping für unterschiedliche Installationen;
 - zentrale Safety- und Arbiter-Logik;
-- genau ein Writer je gemapptem SolarEdge-Ziel;
-- Installation, Update, Migration und vollständiger Rollback;
-- Runtime-, Datei- und Konfliktprüfung;
+- Charge-, Discharge-, Storage-Control- und Command-Mode-Writer;
+- Write-Watchdog als read-only Custom Integration;
+- Terminal-Tools für Bericht und Live-Trace;
+- Runtime-Manifest mit Version, Quellcommit und SHA256 aller installierten Projektdateien;
+- Installer, Update, Migration und vollständiger dateibezogener Rollback;
 - optionale Wetter-, SQL-, evcc- und EVOpt-Anbindung;
-- Installationswege für Home Assistant OS, Supervised, Container und Core;
-- Dokumentation für Erstinstallation und Update.
+- Installationswege für Home Assistant OS, Supervised, Container und Core.
 
 ## Was nicht enthalten ist
 
-Keine privaten Fahrzeug-, Wallbox-, Wärmepumpen-, Shelly-, Strompreis-, Backup-Reserve- oder Akku-Saver-Automationen. Solche Systeme können nur über neutrale optionale Eingangssignale angebunden werden.
+Keine privaten Fahrzeug-, Wallbox-, Wärmepumpen-, Shelly-, Strompreis-, Backup-Reserve- oder Akku-Saver-Automationen. Solche Systeme können über neutrale optionale Eingangssignale angebunden werden.
 
 ## Unterstützte Home-Assistant-Installationen
 
 | Installation | Unterstützung |
 |---|---|
 | Home Assistant OS | vollständig automatisiert über `/config`, `/share`, `ha` und `SUPERVISOR_TOKEN` |
-| Home Assistant Supervised | vollständig automatisiert, sofern Supervisor-CLI und Token verfügbar sind |
-| Home Assistant Container | unterstützt über `CONFIG_ROOT`, `SHARE_ROOT`, `HA_TOKEN`, `HA_API_URL` und `HA_CHECK_COMMAND` |
-| Home Assistant Core | unterstützt über lokale Pfade, Long-Lived Access Token und Python-Konfigurationsprüfung |
+| Home Assistant Supervised | automatisiert, sofern Supervisor-CLI und Token verfügbar sind |
+| Home Assistant Container | über `CONFIG_ROOT`, `SHARE_ROOT`, `HA_TOKEN`, `HA_API_URL` und `HA_CHECK_COMMAND` |
+| Home Assistant Core | über lokale Pfade, Long-Lived Access Token und Python-Konfigurationsprüfung |
 
-Die genauen Befehle stehen unter [Installation auf verschiedenen Home-Assistant-Systemen](docs/09_INSTALLATION_VARIANTS.md).
+Details: [Installation auf verschiedenen Home-Assistant-Systemen](docs/09_INSTALLATION_VARIANTS.md).
 
-## Was benötigt wird
+## Voraussetzungen
 
-Unabhängig vom gewählten Modus werden benötigt:
+Benötigt werden:
 
 - schreibbares SolarEdge-Charge-Limit als `number.*` in Watt;
-- Akku-Ladestand in Prozent;
-- nutzbare Akkukapazität;
+- Akku-Ladestand in Prozent und nutzbare Kapazität;
 - PV-Prognose heute verbleibend, heute gesamt und morgen in kWh;
-- aktuelle PV-Leistung in Watt;
-- aktueller Hausverbrauch in Watt;
+- aktuelle PV-Leistung und aktueller Hausverbrauch in Watt;
 - aktivierte Home-Assistant-Packages;
 - vollständiges Backup;
 - eindeutiges Site-Mapping ohne zweiten Writer auf demselben SolarEdge-Ziel.
 
-`LIVE_PV_POWER_ENTITIES` und `LIVE_CONSUMPTION_POWER_ENTITIES` erwarten Momentanleistung in **W**, keine Energiezähler in `kWh`. Ein Sensorname mit `_filtered` ist optional und kein Pflichtsensor.
+`LIVE_PV_POWER_ENTITIES` und `LIVE_CONSUMPTION_POWER_ENTITIES` erwarten Momentanleistung in **W**, keine Energiezähler in `kWh`. Ein Sensorname mit `_filtered` ist optional.
 
 ## evcc und Optimizer
 
@@ -80,7 +84,7 @@ Für EVOpt werden zusätzlich benötigt:
 - von Home Assistant erreichbare evcc-API;
 - eindeutiger Batterietitel und bei Bedarf Batteriename.
 
-Die konfigurierte Basis-URL enthält weder `/api` noch `/api/state`:
+Die Basis-URL enthält weder `/api` noch `/api/state`:
 
 ```dotenv
 EVOPT_ENABLED=YES
@@ -89,91 +93,68 @@ EVOPT_BATTERY_TITLE=SolarEdge Akku
 EVOPT_BATTERY_NAME=
 ```
 
-Prüfung vor Aktivierung:
+API vor Aktivierung prüfen:
 
 ```bash
 curl -fsS http://evcc-host:7070/api/state \
   | python3 -c "import json,sys; data=json.load(sys.stdin); print('EVCC_API=OK', 'evopt' in data)"
 ```
 
-Erwartet:
-
-```text
-EVCC_API=OK True
-```
-
-Der EVOpt-Adapter liest nur. Er schreibt niemals direkt auf SolarEdge. Erst Safety, Arbiter und der einzige Writer erzeugen eine freigegebene Anforderung. Bei ungültigen oder nicht erreichbaren EVOpt-Daten fällt der Controller vollständig auf `Netzdienlich laden` zurück.
+Der EVOpt-Adapter liest nur. Er schreibt niemals direkt auf SolarEdge. Safety, Arbiter und der einzige Writer bleiben vorgeschaltet.
 
 ## Schnellstart für Home Assistant OS / Supervised
 
-1. Die beiden Release-Dateien nach `/share` kopieren:
+1. Release-Dateien nach `/share` kopieren:
 
    ```text
-   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip
-   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
+   SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip
+   SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
    ```
 
-2. Prüfsumme kontrollieren und in einen leeren Ordner entpacken:
+2. Prüfsumme prüfen und in einen leeren Ordner entpacken:
 
    ```bash
    cd /share
-   sha256sum -c SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip.sha256
-   rm -rf /share/se_controller_release_rc3
-   mkdir -p /share/se_controller_release_rc3
-   unzip -q SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip \
-     -d /share/se_controller_release_rc3
-   cd /share/se_controller_release_rc3/SolarEdge_HA_Energy_Controller
+   sha256sum -c SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
+   rm -rf /share/se_controller_release_rc4
+   mkdir -p /share/se_controller_release_rc4
+   unzip -q SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip \
+     -d /share/se_controller_release_rc4
+   cd /share/se_controller_release_rc4/SolarEdge_HA_Energy_Controller
    ```
 
-   Erwartet:
-
-   ```text
-   SolarEdge_HA_Energy_Controller_v0.1.0-rc.3.zip: OK
-   ```
-
-3. Controller-Dateien installieren und Home Assistant neu starten:
+3. Installieren:
 
    ```bash
    bash scripts/install_package.sh
    ha core restart
    ```
 
-4. Nach dem Neustart die private Standortkonfiguration erstellen:
+   Der Installer kopiert Controller, Runtime-Dateien, Watchdog und Terminal-Tools, ergänzt den Watchdog-Konfigurationsblock genau einmal und führt `ha core check` aus. Bei einem Fehler erfolgt ein automatischer Rollback.
+
+4. Private Standortkonfiguration erstellen und prüfen:
 
    ```bash
    cp config/site_config.env.example config/site_config.env
-   ```
-
-   Eigene Entity-IDs eintragen. Erst nach vollständiger Kontrolle setzen:
-
-   ```dotenv
-   SITE_CONFIG_CONFIRMED=YES
-   ```
-
-5. Mapping anwenden und Erstprüfung starten:
-
-   ```bash
+   # Entity-IDs und EVOpt-Adresse eintragen
    python3 scripts/apply_site_config.py config/site_config.env
    bash scripts/run_first_checks.sh
    ```
 
-6. Den Master `input_boolean.se_netzdienlich_enabled` erst einschalten, wenn die Erstprüfung mit `PASS=True` endet.
+5. Den Master `input_boolean.se_netzdienlich_enabled` erst nach `PASS=True` einschalten.
 
-Die vollständigen Schritte, Pflichtsensoren, EVOpt-Konfiguration, erwarteten Zustände und der Rollback stehen in der [Erstinstallation](docs/02_FIRST_INSTALL.md). Bestehende Installationen verwenden ausschließlich die [Update-Anleitung](docs/05_UPDATE.md).
+Für bestehende Installationen ausschließlich die [Update-Anleitung](docs/05_UPDATE.md) verwenden.
 
-## Installer-Sicherheitsmechanismen
+## Write-Watchdog
 
-Der Installer:
+Nach dem Neustart:
 
-- erkennt Erstinstallation und bestehende Installation;
-- schaltet bei einer bestehenden Installation zuerst den Controller-Master aus;
-- bricht ohne API-Token ab, wenn der sichere Masterzustand nicht bestätigt werden kann;
-- erstellt vor jeder Änderung ein dateibezogenes Backup;
-- kopiert ausschließlich Projektdateien;
-- erzeugt ein Runtime-Manifest mit Version, Quellcommit und SHA256 aller 23 installierten Dateien;
-- führt eine Home-Assistant-Konfigurationsprüfung aus;
-- rollt bei Fehlern automatisch zurück;
-- lässt den Controller-Master ausgeschaltet.
+```bash
+/config/se_write_watchdog_tools/report.sh 200
+/config/se_write_watchdog_tools/watch.sh
+```
+
+Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das gemappte Charge-Limit, die zugeordnete Automation beziehungsweise API-Quelle, den Write-Intent, echte Zustandswechsel und schnelle Roundtrips. Details: [Write-Watchdog](docs/10_WRITE_WATCHDOG.md).
 
 ## Dokumentation
 
@@ -188,6 +169,7 @@ Der Installer:
 - [Migration](docs/06_MIGRATION.md)
 - [Fehlerdiagnose](docs/07_TROUBLESHOOTING.md)
 - [Datenschutz und Sicherheit](docs/08_PRIVACY_AND_SECURITY.md)
+- [Write-Watchdog](docs/10_WRITE_WATCHDOG.md)
 
 ### Betriebsarten
 
@@ -211,17 +193,17 @@ Der Installer:
 - [Funktion der YAML-Dateien](docs/reference/01_YAML_FILES.md)
 - [Safety, Arbiter und Writer](docs/reference/02_SAFETY_ARBITER_WRITERS.md)
 - [Tests und Release-Gates](docs/reference/03_TESTS_AND_RELEASE_GATES.md)
-- [Technischer Status RC3](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
+- [Technischer Status RC4](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
 
 ## Sicherheit
 
 - Der Master bleibt nach Installation, Update, Migration und Rollback ausgeschaltet.
 - Site-Konfiguration, Config Check und Sanity Check müssen gültig sein.
 - Leere optionale Writer-Mappings deaktivieren den jeweiligen Writer.
-- EVOpt schreibt nie direkt auf SolarEdge; der Adapter liefert nur eine Anforderung.
-- Fehlende oder ungültige EVOpt-Daten führen zum Fallback `Netzdienlich laden`.
-- Vor jedem Installations- oder Updatevorgang wird ein dateibezogenes Backup erzeugt.
+- EVOpt schreibt nie direkt auf SolarEdge.
+- Kurze EVOpt-Ausfälle öffnen den Speicher im EVOpt-Modus nicht automatisch.
 - Weitere Automationen dürfen nicht auf dieselben gemappten SolarEdge-Ziele schreiben.
+- Der Watchdog ist read-only; er beobachtet Schreibaufrufe, erzeugt aber selbst keine SolarEdge-Befehle.
 
 ## Lizenz
 

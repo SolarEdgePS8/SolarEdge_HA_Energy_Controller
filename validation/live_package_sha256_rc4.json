@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0-rc.4",
+  "reference": "Home Assistant reference installation export from 2026-07-22",
+  "scope": "All 18 public se_controller_*.yaml package files",
+  "files": [
+    {"path":"package/se_controller_00_core.yaml","sha256":"871a1fa03bc1b8f24f335bdcab6699a6b53f7a12920d2673cd723a67074df829","size":19316},
+    {"path":"package/se_controller_05_external_interfaces.yaml","sha256":"13f555439fd711508f059b70d092993459bcafbd140b8994456352a0bd21b9a6","size":1980},
+    {"path":"package/se_controller_10_base_planning.yaml","sha256":"2f057d4d6dbc2373575d4bb26cb66f1809b4054f6e58acfddae291cc3187bf42","size":33914},
+    {"path":"package/se_controller_11_weather_planning.yaml","sha256":"20059b4ebfd635ef68af5d24abb7a3657cdaf034687acaa696c8ffaedc68e3e2","size":45294},
+    {"path":"package/se_controller_12_load_pv_planning.yaml","sha256":"fef473723e126016b38de732a8b20b39ffac0a0f861f58f7c605b34256c065e9","size":10073},
+    {"path":"package/se_controller_14_data_sources.yaml","sha256":"1465dc5139b8c968b71c9c025cc18cdc409fcd6d758a3e148b58761dd2513939","size":6567},
+    {"path":"package/se_controller_20_mode_self_consumption.yaml","sha256":"8c1451e21f148f30dcb4b0145fd72e16da35c979131d95438441e06faa3bbaac","size":1025},
+    {"path":"package/se_controller_30_mode_grid_friendly.yaml","sha256":"5b92b507f941f74cab6a30536e3734ba13d61015ad89e27e98cf4a8b4abc4e22","size":19100},
+    {"path":"package/se_controller_40_mode_battery_care.yaml","sha256":"c2acf1bce205d85edc5a7cdfdb97ca13c42dfb4f2c953b0bf356211cea266da7","size":33426},
+    {"path":"package/se_controller_50_mode_evopt.yaml","sha256":"337abcd600aca2f0dfbf5fe3b818292a51a2f4459d7eb2c23221c64ecc75852e","size":39706},
+    {"path":"package/se_controller_60_safety.yaml","sha256":"52e53a77ad23836890ce4f58127b5c95b3f8c6031094de3ee41b0338b70d4e7e","size":8363},
+    {"path":"package/se_controller_70_arbiter.yaml","sha256":"e00cccb01b54d48570f07cc785c0161bf4b6172261669d7110873bf8283aacb1","size":15412},
+    {"path":"package/se_controller_80_charge_writer.yaml","sha256":"3a99d944efaf4d62eefdb462b079f4cd1fac69ff9ac00fe5fe6cff917b712b52","size":10704},
+    {"path":"package/se_controller_82_discharge_writer.yaml","sha256":"3e6a5e3756c3771b651319b3b9f329a8aa4f4c3795ebd1ab46c8eb3f58936f76","size":5226},
+    {"path":"package/se_controller_83_storage_control_writer.yaml","sha256":"e9663975e5503c111e9ab4ab911791508393457fcc21e6e4eec5befec54d3a99","size":3054},
+    {"path":"package/se_controller_84_command_mode_writer.yaml","sha256":"db3071aa88b9556f74c1cdec9be98745571dd6b138fa7c332394cffeff7b0adb","size":6452},
+    {"path":"package/se_controller_90_diagnostics_planning.yaml","sha256":"39d8946da35040184be419042de8013d8ec18cf21baa6b8e5c2b6e556ada27f5","size":35593},
+    {"path":"package/se_controller_98_compatibility_automations.yaml","sha256":"0fee26fb1ef5592e2e95200e75cc3a1d3e7cf8b2040722f9526186a9218f3e33","size":2128}
+  ]
+}

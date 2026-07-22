@@ -3,7 +3,7 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/dist}"
-VERSION="${2:-0.1.0-rc.3}"
+VERSION="${2:-0.1.0-rc.4}"
 
 python3 "$ROOT/audit/readonly_audit.py" "$ROOT" --release-gate
 
@@ -47,10 +47,19 @@ with tempfile.TemporaryDirectory(prefix="se_controller_release_") as tmp:
         root,
         stage,
         ignore=shutil.ignore_patterns(
-            ".git", ".github", ".pytest_cache", "tests",
-            "requirements-dev.txt", "dist", "build", "__pycache__", "*.pyc",
-            "site_config.env", "private_migration_values.env",
-            "*.zip", "*.tar.gz",
+            ".git",
+            ".github",
+            ".pytest_cache",
+            "tests",
+            "requirements-dev.txt",
+            "dist",
+            "build",
+            "__pycache__",
+            "*.pyc",
+            "site_config.env",
+            "private_migration_values.env",
+            "*.zip",
+            "*.tar.gz",
         ),
     )
 
@@ -61,9 +70,11 @@ with tempfile.TemporaryDirectory(prefix="se_controller_release_") as tmp:
         stale.unlink(missing_ok=True)
 
     files = sorted(
-        p for p in stage.rglob("*")
+        p
+        for p in stage.rglob("*")
         if p.is_file()
-        and p.relative_to(stage).as_posix() not in {
+        and p.relative_to(stage).as_posix()
+        not in {
             "validation/release_manifest.json",
             "validation/SHA256SUMS",
         }
@@ -74,11 +85,13 @@ with tempfile.TemporaryDirectory(prefix="se_controller_release_") as tmp:
     for path in files:
         rel = path.relative_to(stage).as_posix()
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        entries.append({
-            "path": rel,
-            "size": path.stat().st_size,
-            "sha256": digest,
-        })
+        entries.append(
+            {
+                "path": rel,
+                "size": path.stat().st_size,
+                "sha256": digest,
+            }
+        )
         sums.append(f"{digest}  {rel}")
 
     manifest = {
@@ -99,9 +112,17 @@ with tempfile.TemporaryDirectory(prefix="se_controller_release_") as tmp:
 
     if zip_path.exists():
         zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with zipfile.ZipFile(
+        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
         for path in sorted(p for p in stage.rglob("*") if p.is_file()):
-            archive.write(path, arcname=f"SolarEdge_HA_Energy_Controller/{path.relative_to(stage).as_posix()}")
+            archive.write(
+                path,
+                arcname=(
+                    "SolarEdge_HA_Energy_Controller/"
+                    f"{path.relative_to(stage).as_posix()}"
+                ),
+            )
 
 digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
 sha_path.write_text(f"{digest}  {zip_path.name}\n", encoding="utf-8")

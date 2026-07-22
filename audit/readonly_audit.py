@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
 import sys
@@ -21,6 +22,7 @@ warnings: list[str] = []
 required = {
     "package/se_controller_00_core.yaml",
     "package/se_controller_05_external_interfaces.yaml",
+    "package/se_controller_50_mode_evopt.yaml",
     "package/se_controller_80_charge_writer.yaml",
     "package/se_controller_82_discharge_writer.yaml",
     "package/se_controller_83_storage_control_writer.yaml",
@@ -29,6 +31,13 @@ required = {
     "scripts/rollback.sh",
     "scripts/apply_site_config.py",
     "config/site_config.env.example",
+    "config/se_write_watchdog.yaml.example",
+    "custom_components/se_write_watchdog/__init__.py",
+    "custom_components/se_write_watchdog/manifest.json",
+    "custom_components/se_write_watchdog/services.yaml",
+    "tools/se_write_watchdog/report.sh",
+    "tools/se_write_watchdog/watch.sh",
+    "validation/live_package_sha256_rc4.json",
 }
 for rel in sorted(required):
     if not (root / rel).is_file():
@@ -92,8 +101,13 @@ for hardcoded in [
         errors.append(f"HARD_CODED_FALLBACK {hardcoded}")
 
 helper_domains = {
-    "input_boolean", "input_datetime", "input_number",
-    "input_select", "input_text", "counter", "timer",
+    "input_boolean",
+    "input_datetime",
+    "input_number",
+    "input_select",
+    "input_text",
+    "counter",
+    "timer",
 }
 helper_defs: dict[str, list[str]] = defaultdict(list)
 automation_ids: list[str] = []
@@ -154,6 +168,97 @@ for writer in [
     if "binary_sensor.se_nf_controller_write_enabled" not in text:
         errors.append(f"WRITER_WITHOUT_GATE {writer}")
 
+# RC4 contracts from the verified reference installation.
+core_text = (root / "package/se_controller_00_core.yaml").read_text(encoding="utf-8")
+evopt_text = (root / "package/se_controller_50_mode_evopt.yaml").read_text(encoding="utf-8")
+writer_text = (root / "package/se_controller_80_charge_writer.yaml").read_text(encoding="utf-8")
+watchdog_text = (root / "custom_components/se_write_watchdog/__init__.py").read_text(
+    encoding="utf-8"
+)
+
+for helper in ("se_nf_site_config_confirmed", "se_netzdienlich_enabled"):
+    match = re.search(
+        rf"^  {re.escape(helper)}:\s*$\n(?P<body>(?:^    .*\n)*)",
+        core_text,
+        re.M,
+    )
+    if not match or "initial:" in match.group("body"):
+        errors.append(f"NON_PERSISTENT_CORE_HELPER {helper}")
+
+for helper in ("se_nf_evopt_shadow_enabled", "se_nf_evopt_base_url"):
+    match = re.search(
+        rf"^  {re.escape(helper)}:\s*$\n(?P<body>(?:^    .*\n)*)",
+        evopt_text,
+        re.M,
+    )
+    if not match or "initial:" in match.group("body"):
+        errors.append(f"NON_PERSISTENT_EVOPT_HELPER {helper}")
+
+required_evopt_markers = {
+    "HOLDCHARGE_LATCH_180": "seconds: 180",
+    "STARTUP_GRACE_1200": "fallback_grace_s = 1200",
+    "STARTUP_HOLD_ACTUAL": "held_w | round(0)",
+    "PERMISSIVE_FALLBACK_GATE": "fallback_permissive_ready",
+    "LATCH_DURING_ACTIVE_MODE": "selected == 'EVOpt optimiert' and charge_block",
+}
+for name, marker in required_evopt_markers.items():
+    if marker not in evopt_text:
+        errors.append(f"EVOPT_CONTRACT {name}")
+
+required_writer_markers = {
+    "FINAL_TARGET_TRIGGER": "sensor.se_nf_desired_target",
+    "OPEN_STABLE_90": "target_value_stable_s",
+    "OPEN_RECHECK_90": 'for: "00:01:30"',
+    "WRITE_INTENT": "se_charge_limit_write_intent",
+    "CORRECT_CANDIDATE_ENTITY": "sensor.se_nf_evopt_candidate_target_w",
+}
+for name, marker in required_writer_markers.items():
+    if marker not in writer_text:
+        errors.append(f"WRITER_CONTRACT {name}")
+
+if writer_text.count("service: number.set_value") != 1:
+    errors.append(
+        f"CHARGE_WRITER_COUNT {writer_text.count('service: number.set_value')}"
+    )
+if re.search(r"sensor\.se_nf_evopt_candidate_target(?!_w)\b", writer_text):
+    errors.append("WRONG_EVOPT_CANDIDATE_ENTITY")
+if 'active_control and action_raw == "holdcharge"' not in watchdog_text:
+    errors.append("WATCHDOG_RAW_ACTION_FALSE_POSITIVE_GUARD")
+
+manifest_path = root / "custom_components/se_write_watchdog/manifest.json"
+try:
+    watchdog_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+except Exception as exc:
+    errors.append(f"WATCHDOG_MANIFEST {exc}")
+else:
+    if watchdog_manifest.get("version") != "1.0.2":
+        errors.append(f"WATCHDOG_VERSION {watchdog_manifest.get('version')}")
+
+# Byte parity with the exported reference installation is a release gate.
+parity_path = root / "validation/live_package_sha256_rc4.json"
+try:
+    parity = json.loads(parity_path.read_text(encoding="utf-8"))
+except Exception as exc:
+    errors.append(f"LIVE_PARITY_MANIFEST {exc}")
+else:
+    expected_paths = set()
+    for item in parity.get("files", []):
+        rel = str(item.get("path", ""))
+        expected_paths.add(rel)
+        path = root / rel
+        if not path.is_file():
+            errors.append(f"LIVE_PARITY_MISSING {rel}")
+            continue
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != item.get("sha256"):
+            errors.append(f"LIVE_PARITY_HASH {rel}: {actual}")
+    actual_paths = {p.relative_to(root).as_posix() for p in package_files}
+    if expected_paths != actual_paths:
+        errors.append(
+            "LIVE_PARITY_FILESET expected="
+            f"{sorted(expected_paths)} actual={sorted(actual_paths)}"
+        )
+
 # No private config in release tree.
 for private in [
     "config/site_config.env",
@@ -170,6 +275,8 @@ report = {
     "package_yaml_files": len(package_files),
     "helper_definitions": len(helper_defs),
     "automation_ids": len(automation_ids),
+    "watchdog_version": "1.0.2",
+    "live_package_parity": not any(item.startswith("LIVE_PARITY") for item in errors),
     "pass": passed,
 }
 print(json.dumps(report, indent=2, ensure_ascii=False))
