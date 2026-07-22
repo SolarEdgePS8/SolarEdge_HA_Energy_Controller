@@ -1,4 +1,4 @@
-name: Validate and publish RC4
+name: Validate SolarEdge HA Energy Controller
 
 on:
   push:
@@ -10,6 +10,8 @@ on:
 permissions:
   contents: read
 
+# Dauerhafte CI für Pull Requests und main.
+# Veröffentlichte Releases werden nicht bei jedem späteren main-Commit erneut erzeugt.
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -194,71 +196,3 @@ jobs:
             dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
           if-no-files-found: error
           retention-days: 30
-
-  publish:
-    name: Publish v0.1.0-rc.4 prerelease
-    needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download tested release bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: SolarEdge_HA_Energy_Controller_v0.1.0-rc.4
-          path: release
-
-      - name: Publish GitHub prerelease once
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: v0.1.0-rc.4
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "GitHub Release $TAG existiert bereits; keine erneute Veröffentlichung."
-            exit 0
-          fi
-
-          cat > release-notes.md <<'NOTES'
-          ## SolarEdge HA Energy Controller v0.1.0-rc.4
-
-          RC4 verhindert unnötige `0 → 5000 → 0`-Schreibzyklen beim Home-Assistant-/EVOpt-Startup und veröffentlicht den auf der Referenzinstallation getesteten Write-Watchdog.
-
-          ### Wesentliche Änderungen
-
-          - EVOpt-Startup-Handover hält den zuletzt bestätigten SolarEdge-Zustand;
-          - vollständiger Legacy-Fallback erst nach 20 Minuten durchgehendem EVOpt-Ausfall;
-          - `holdcharge` wirkt sofort und bleibt 180 Sekunden gelatcht;
-          - Freigabe auf 5000 W erst nach 90 Sekunden stabilem finalem Sollwert;
-          - nur der zentrale Charge-Limit-Writer schreibt;
-          - Master, Site-Bestätigung, EVOpt-Aktivierung und EVOpt-URL bleiben über Neustarts erhalten;
-          - Watchdog 1.0.2 protokolliert Service-Aufrufe, Context-Kette, Write-Intent, Zustandswechsel, Roundtrips und unerwartete Schreiber;
-          - alle 18 veröffentlichten Package-YAMLs sind per SHA256 byteidentisch mit dem geprüften Live-Export.
-
-          ### Installation / Update
-
-          1. ZIP und `.sha256` aus den Release-Assets in einen lokalen Arbeitsordner kopieren.
-          2. Prüfsumme mit `sha256sum -c` kontrollieren.
-          3. ZIP in einen leeren Ordner entpacken.
-          4. Für eine neue Installation `bash scripts/install_package.sh` ausführen.
-          5. Für ein Update `bash scripts/update_package.sh` ausführen.
-          6. Home Assistant neu starten, Site-Konfiguration anwenden und `bash scripts/run_first_checks.sh` ausführen.
-          7. Den Controller-Master erst nach `PASS=True` einschalten.
-
-          Der Installer installiert den Watchdog automatisch und sichert beziehungsweise entfernt ihn beim Rollback zusammen mit den Controller-Dateien.
-
-          Vollständige Anleitungen: `docs/02_FIRST_INSTALL.md`, `docs/05_UPDATE.md`, `docs/10_WRITE_WATCHDOG.md`.
-
-          Dieses Release ist weiterhin ein Prerelease und noch kein stabiler v1.0-Stand.
-          NOTES
-
-          gh release create "$TAG" \
-            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip \
-            release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256 \
-            --target "$GITHUB_SHA" \
-            --title "SolarEdge HA Energy Controller v0.1.0-rc.4" \
-            --notes-file release-notes.md \
-            --prerelease
