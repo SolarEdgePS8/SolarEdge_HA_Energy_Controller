@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - test/deep-codespaces-testbench
+  pull_request:
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +13,9 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' || github.head_ref == 'test/deep-codespaces-testbench')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout testbench branch
