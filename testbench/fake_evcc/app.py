@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -26,7 +27,9 @@ FIXTURES: dict[str, dict[str, Any] | str] = {
             "solverStatus": "optimal",
             "suggestion": {"action": "holdcharge", "charge": 0, "discharge": 0},
             "batteries": [{"title": "Test Battery", "controllable": True}],
-            "plan": [{"start": "2026-07-22T12:00:00+02:00", "action": "holdcharge"}],
+            "plan": [
+                {"start": "2026-07-22T12:00:00+02:00", "action": "holdcharge"}
+            ],
         }
     },
     "charge": {
@@ -44,7 +47,9 @@ FIXTURES: dict[str, dict[str, Any] | str] = {
             "solverStatus": "optimal",
             "suggestion": {"action": "discharge", "charge": 0, "discharge": 3000},
             "batteries": [{"title": "Test Battery", "controllable": True}],
-            "plan": [{"start": "2026-07-22T12:00:00+02:00", "action": "discharge"}],
+            "plan": [
+                {"start": "2026-07-22T12:00:00+02:00", "action": "discharge"}
+            ],
         }
     },
     "stale": {
@@ -79,6 +84,11 @@ FIXTURES: dict[str, dict[str, Any] | str] = {
         }
     },
     "invalid_json": "{not-json",
+    # Transport-level fixtures are explicitly selectable so the testbench can
+    # reproduce API outages without any external network or real evcc instance.
+    "http_404": {"error": "synthetic not found"},
+    "http_500": {"error": "synthetic server error"},
+    "timeout": {"error": "synthetic delayed response"},
 }
 
 
@@ -114,7 +124,11 @@ class FakeEvccHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except BrokenPipeError:
+            # Expected when the timeout test deliberately closes the client.
+            return
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -123,9 +137,14 @@ class FakeEvccHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             scenario = self.server.scenarios.get()
+            if scenario == "http_404":
+                self._send(HTTPStatus.NOT_FOUND, b'{"error":"synthetic"}')
+                return
             if scenario == "http_500":
                 self._send(HTTPStatus.INTERNAL_SERVER_ERROR, b'{"error":"synthetic"}')
                 return
+            if scenario == "timeout":
+                time.sleep(1.0)
             payload = FIXTURES[scenario]
             if isinstance(payload, str):
                 self._send(HTTPStatus.OK, payload.encode("utf-8"))
