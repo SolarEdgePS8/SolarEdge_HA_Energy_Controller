@@ -40,6 +40,7 @@ frontend:
 logger:
   default: warning
   logs:
+    homeassistant.components.system_log: info
     custom_components.se_write_watchdog: info
     custom_components.se_test_replay: info
 
@@ -48,8 +49,6 @@ se_test_replay:
   output_dir: /config/se_24h_results
 YAML
 
-# Home Assistant 2026.7 no longer exports this historical test-event constant.
-# The replay uses the unchanged event name only inside the isolated container.
 cat > "$CONFIG/sitecustomize.py" <<'PY'
 import homeassistant.const as const
 
@@ -72,114 +71,8 @@ cp -a "$ROOT/testbench/custom_components/se_test_replay" \
   "$CONFIG/custom_components/se_test_replay"
 printf '2026-07-21 00:00:00\n' > "$CONFIG/faketime.txt"
 
-# Patch only the copied test component. Production packages remain byte-identical
-# to main. The patch makes the OS-level fake clock follow each replay slot and
-# explicitly invokes the real session-manager and writer automations after their
-# time/stability gates have elapsed.
-python - "$CONFIG/custom_components/se_test_replay/__init__.py" <<'PY'
-from __future__ import annotations
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-text = text.replace("datetime(2031, 7, 21", "datetime(2026, 7, 21")
-
-old_clock = '''    async def clock(self, value: datetime) -> None:
-        self.now = value
-        self.hass.bus.async_fire(EVENT_TIME_CHANGED, {"now": value.astimezone(UTC)})
-        await self.settle()
-'''
-new_clock = '''    async def clock(self, value: datetime) -> None:
-        self.now = value
-        await asyncio.to_thread(
-            Path("/config/faketime.txt").write_text,
-            value.strftime("%Y-%m-%d %H:%M:%S") + "\\n",
-            encoding="utf-8",
-        )
-        self.hass.bus.async_fire(EVENT_TIME_CHANGED, {"now": value.astimezone(UTC)})
-        await self.settle()
-'''
-if old_clock not in text:
-    raise SystemExit("clock patch anchor not found")
-text = text.replace(old_clock, new_clock)
-
-old_svc = '''    async def svc(self, domain: str, service: str, entity: str, **data: Any) -> None:
-        await self.hass.services.async_call(domain, service, {"entity_id": entity, **data}, blocking=True)
-        await self.settle()
-
-    def state(self, entity: str) -> str:
-'''
-new_svc = '''    async def svc(self, domain: str, service: str, entity: str, **data: Any) -> None:
-        await self.hass.services.async_call(domain, service, {"entity_id": entity, **data}, blocking=True)
-        await self.settle()
-
-    async def trigger_automation(self, entity: str) -> None:
-        if self.hass.states.get(entity) is None:
-            raise RuntimeError(f"missing production automation: {entity}")
-        await self.hass.services.async_call(
-            "automation",
-            "trigger",
-            {"entity_id": entity, "skip_condition": False},
-            blocking=True,
-        )
-        await self.settle()
-
-    async def refresh_controller(self) -> None:
-        entities = [
-            "sensor.se_controller_eigenverbrauch_next_session_state",
-            "sensor.se_controller_netzdienlich_next_session_state",
-            "sensor.se_controller_akku_schonen_next_session_state",
-            "sensor.se_nf_optimization_mode_effective",
-            "sensor.se_nf_desired_target",
-            "sensor.se_nf_decision_reason",
-            "sensor.se_nf_writer_mode",
-        ]
-        await self.hass.services.async_call(
-            "homeassistant",
-            "update_entity",
-            {"entity_id": entities},
-            blocking=True,
-        )
-        await self.settle()
-
-    def state(self, entity: str) -> str:
-'''
-if old_svc not in text:
-    raise SystemExit("service patch anchor not found")
-text = text.replace(old_svc, new_svc)
-
-old_loop = '''                    await self.clock(start)
-                    await self.measurements(row)
-                    for seconds in (60, 120, 180, 300):
-                        await self.clock(start + timedelta(seconds=seconds))
-                    snap = self.snapshot(row)
-'''
-new_loop = '''                    await self.clock(start)
-                    await self.measurements(row)
-                    await self.refresh_controller()
-                    await self.trigger_automation(
-                        "automation.solaredge_energy_controller_session_manager"
-                    )
-                    for seconds in (60, 120, 180, 300):
-                        await self.clock(start + timedelta(seconds=seconds))
-                        await self.refresh_controller()
-                        if seconds in (120, 300):
-                            await self.trigger_automation(
-                                "automation.solaredge_energy_controller_session_manager"
-                            )
-                            await self.refresh_controller()
-                            await self.trigger_automation(
-                                "automation.solaredge_energy_controller_charge_limit_writer"
-                            )
-                    snap = self.snapshot(row)
-'''
-if old_loop not in text:
-    raise SystemExit("replay-loop patch anchor not found")
-text = text.replace(old_loop, new_loop)
-path.write_text(text, encoding="utf-8")
-PY
-
+python "$ROOT/testbench/patch_ha_24h_component.py" \
+  "$CONFIG/custom_components/se_test_replay/__init__.py"
 python -m py_compile "$CONFIG/custom_components/se_test_replay/__init__.py"
 
 docker build \
@@ -193,7 +86,6 @@ docker run --rm --entrypoint sh "$HA_TEST_IMAGE" -c \
   'cat /etc/os-release; readlink -f /usr/local/lib/libfaketime.so.1' \
   > "$ARTIFACTS/faketime-image-info.txt"
 
-# Validate the exact installed main production packages plus the test-only replay.
 docker run --rm \
   -e PYTHONPATH=/config \
   --entrypoint python \
