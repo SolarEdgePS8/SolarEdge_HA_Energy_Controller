@@ -4,13 +4,17 @@ on:
   push:
     branches:
       - fix/ci-backup-collision-node24
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   apply-fix:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' || github.head_ref == 'fix/ci-backup-collision-node24')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout fix branch
