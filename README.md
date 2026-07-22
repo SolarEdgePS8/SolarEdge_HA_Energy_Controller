@@ -1,6 +1,10 @@
 # SolarEdge HA Energy Controller
 
-Ein portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher. Planung, Sicherheitsprüfung und Schreibzugriffe sind getrennt. Der Controller unterstützt vier Betriebsarten:
+Portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher mit vier Modi, EVCC Optimizer, zentralem Safety-Arbiter, genau einem Writer je SolarEdge-Ziel und einem read-only Write-Watchdog. Planung, Sicherheitsprüfung und Schreibzugriffe sind klar voneinander getrennt.
+
+> **Aktives Nachfolgeprojekt:** Dieses Repository ersetzt [`Solaredge_Netzdienlich`](https://github.com/SolarEdgePS8/Solaredge_Netzdienlich). Das alte Repository bleibt nur zur historischen Nachvollziehbarkeit erhalten. Bestehende Nutzer verwenden die [Migrationsanleitung](docs/11_MIGRATION_FROM_NETZDIENLICH.md).
+
+Der Controller unterstützt vier Betriebsarten:
 
 | Modus | Zweck |
 |---|---|
@@ -167,6 +171,7 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 - [Erster Start](docs/04_FIRST_START.md)
 - [Update](docs/05_UPDATE.md)
 - [Migration](docs/06_MIGRATION.md)
+- [Migration aus Solaredge_Netzdienlich](docs/11_MIGRATION_FROM_NETZDIENLICH.md)
 - [Fehlerdiagnose](docs/07_TROUBLESHOOTING.md)
 - [Datenschutz und Sicherheit](docs/08_PRIVACY_AND_SECURITY.md)
 - [Write-Watchdog](docs/10_WRITE_WATCHDOG.md)
