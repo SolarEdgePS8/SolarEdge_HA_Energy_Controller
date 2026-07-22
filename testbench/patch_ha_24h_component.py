@@ -1,6 +1,6 @@
 """Patch the copied test-only HA replay component for accelerated runtime use.
 
-Production packages are never modified.  Every replacement is guarded so a
+Production packages are never modified. Every replacement is guarded so a
 future source change fails visibly instead of silently weakening the test.
 """
 
@@ -20,6 +20,7 @@ def replace_once(text: str, old: str, new: str, name: str) -> str:
 def patch(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     text = text.replace("datetime(2031, 7, 21", "datetime(2026, 7, 21")
+    text = replace_once(text, "import logging\n", "import logging\nimport os\n", "os-import")
 
     text = replace_once(
         text,
@@ -30,11 +31,17 @@ def patch(path: Path) -> None:
 ''',
         '''    async def clock(self, value: datetime) -> None:
         self.now = value
-        await asyncio.to_thread(
-            Path("/config/faketime.txt").write_text,
-            value.strftime("%Y-%m-%d %H:%M:%S") + "\\n",
-            encoding="utf-8",
-        )
+
+        def write_clock_atomically() -> None:
+            target = Path("/config/faketime.txt")
+            temporary = target.with_suffix(".tmp")
+            temporary.write_text(
+                value.strftime("%Y-%m-%d %H:%M:%S") + "\\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, target)
+
+        await asyncio.to_thread(write_clock_atomically)
         self.hass.bus.async_fire(EVENT_TIME_CHANGED, {"now": value.astimezone(UTC)})
         await self.settle()
 ''',
