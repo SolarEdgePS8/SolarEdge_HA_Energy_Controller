@@ -1,0 +1,23 @@
+# OPTIONAL: einen Endkunden-Gesamtpreis in EUR/kWh auf ct/kWh normieren.
+#
+# Vor Verwendung anpassen:
+#   sensor.example_total_price_eur_kwh
+#
+# Nur einen Preis verwenden, der bereits alle für die eigene Entscheidung
+# relevanten Zuschläge, Steuern und Mehrwertsteuer enthält.
+
+template:
+  - sensor:
+      - name: "Electricity Total Price Example"
+        unique_id: se_example_electricity_total_price_ct_kwh
+        state_class: measurement
+        unit_of_measurement: "ct/kWh"
+        icon: mdi:currency-eur
+        availability: >-
+          {{ states('sensor.example_total_price_eur_kwh')
+             not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {{ (states('sensor.example_total_price_eur_kwh') | float(0) * 100) | round(3) }}
+        attributes:
+          source_entity: sensor.example_total_price_eur_kwh
+          source_unit_expected: EUR/kWh

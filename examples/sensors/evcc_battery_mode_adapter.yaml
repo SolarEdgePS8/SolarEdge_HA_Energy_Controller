@@ -1,0 +1,28 @@
+# OPTIONAL: einen evcc-/HA-Integrationsstatus auf einfache Textwerte normalisieren.
+#
+# Vor Verwendung anpassen:
+#   sensor.example_evcc_battery_mode_raw
+#
+# Dieses Signal ersetzt nicht den EVOpt-Plan unter /api/state. Es ist nur ein
+# zusätzliches defensives Signal für eine mögliche Lade-/Entladeanforderung.
+
+template:
+  - sensor:
+      - name: "EVCC Battery Mode Example"
+        unique_id: se_example_evcc_battery_mode
+        availability: >-
+          {{ states('sensor.example_evcc_battery_mode_raw')
+             not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {% set raw = states('sensor.example_evcc_battery_mode_raw') | lower | trim %}
+          {% if 'discharge' in raw or 'entlad' in raw %}
+            discharge
+          {% elif 'charge' in raw or 'laden' in raw %}
+            charge
+          {% elif raw in ['normal', 'hold', 'idle', 'off'] %}
+            {{ raw }}
+          {% else %}
+            unknown
+          {% endif %}
+        attributes:
+          raw_value: "{{ states('sensor.example_evcc_battery_mode_raw') }}"

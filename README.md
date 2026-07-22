@@ -37,6 +37,7 @@ Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarE
 ## Was enthalten ist
 
 - 18 Controller-Package-YAMLs;
+- read-only Mapping-Assistent mit bewerteten Entity-Vorschlägen und sicherer `site_config.env`;
 - Entity-Mapping für unterschiedliche Installationen;
 - zentrale Safety- und Arbiter-Logik;
 - Charge-, Discharge-, Storage-Control- und Command-Mode-Writer;
@@ -44,7 +45,8 @@ Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarE
 - Terminal-Tools für Bericht und Live-Trace;
 - Runtime-Manifest mit Version, Quellcommit und SHA256 aller installierten Projektdateien;
 - Installer, Update, Migration und vollständiger dateibezogener Rollback;
-- optionale Wetter-, SQL-, evcc- und EVOpt-Anbindung;
+- optionale Wetter-, SQL-, evcc-, EVOpt- und Strompreis-/Kosten-Anbindung;
+- neutrale Beispiel-Packages für Filter, Energiezähler, Forecast-, evcc- und Preisadapter;
 - Installationswege für Home Assistant OS, Supervised, Container und Core.
 
 ## Was nicht enthalten ist
@@ -75,6 +77,8 @@ Benötigt werden:
 - eindeutiges Site-Mapping ohne zweiten Writer auf demselben SolarEdge-Ziel.
 
 `LIVE_PV_POWER_ENTITIES` und `LIVE_CONSUMPTION_POWER_ENTITIES` erwarten Momentanleistung in **W**, keine Energiezähler in `kWh`. Ein Sensorname mit `_filtered` ist optional.
+
+Typische SolarEdge-Entities kommen aus SolarEdge Modbus Multi; Prognose, Wetter, evcc und Strompreis können aus getrennten Integrationen oder eigenen Adapter-Sensoren stammen. Der Controller ist nicht an deren Entity-Namen gebunden.
 
 ## evcc und Optimizer
 
@@ -136,16 +140,25 @@ Der EVOpt-Adapter liest nur. Er schreibt niemals direkt auf SolarEdge. Safety, A
 
    Der Installer kopiert Controller, Runtime-Dateien, Watchdog und Terminal-Tools, ergänzt den Watchdog-Konfigurationsblock genau einmal und führt `ha core check` aus. Bei einem Fehler erfolgt ein automatischer Rollback.
 
-4. Private Standortkonfiguration erstellen und prüfen:
+4. Entity-Vorschläge read-only erzeugen:
 
    ```bash
-   cp config/site_config.env.example config/site_config.env
-   # Entity-IDs und EVOpt-Adresse eintragen
-   python3 scripts/apply_site_config.py config/site_config.env
-   bash scripts/run_first_checks.sh
+   python3 scripts/discover_entities.py \
+     --report /share/se_controller_mapping_report.json \
+     --output config/site_config.env
    ```
 
-5. Den Master `input_boolean.se_netzdienlich_enabled` erst nach `PASS=True` einschalten.
+   Der Assistent liest nur Home-Assistant-States, aktiviert keinen Writer und erzeugt immer `SITE_CONFIG_CONFIRMED=NO` sowie `EVOPT_ENABLED=NO`.
+
+5. Vorschläge mit [Entity-Mapping](docs/03_ENTITY_MAPPING.md) und [Sensorquellen](docs/12_SENSOR_SOURCES_AND_EXAMPLES.md) prüfen. Fehlende neutrale Adapter liegen unter [`examples/sensors`](examples/sensors/README.md). Erst danach `SITE_CONFIG_CONFIRMED=YES` setzen und anwenden:
+
+   ```bash
+   python3 scripts/apply_site_config.py config/site_config.env
+   bash scripts/run_first_checks.sh
+   python3 scripts/check_external_writer_conflicts.py "${CONFIG_ROOT:-/config}"
+   ```
+
+6. Den Master `input_boolean.se_netzdienlich_enabled` erst nach `PASS=True` einschalten.
 
 Für bestehende Installationen ausschließlich die [Update-Anleitung](docs/05_UPDATE.md) verwenden.
 
@@ -168,6 +181,8 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 - [Erstinstallation](docs/02_FIRST_INSTALL.md)
 - [Installation auf OS, Supervised, Container und Core](docs/09_INSTALLATION_VARIANTS.md)
 - [Entity-Mapping](docs/03_ENTITY_MAPPING.md)
+- [Sensorquellen, Einheiten und eigene Zusatzsensoren](docs/12_SENSOR_SOURCES_AND_EXAMPLES.md)
+- [Optionale Sensorbeispiele](examples/sensors/README.md)
 - [Erster Start](docs/04_FIRST_START.md)
 - [Update](docs/05_UPDATE.md)
 - [Migration](docs/06_MIGRATION.md)
@@ -192,6 +207,7 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 - [evcc](docs/integrations/05_EVCC.md)
 - [evcc Optimizer](docs/integrations/06_EVCC_OPTIMIZER.md)
 - [Externe Signale](docs/integrations/07_EXTERNAL_SIGNALS.md)
+- [Dynamische Strompreise und Kosten](docs/integrations/08_ELECTRICITY_PRICE.md)
 
 ### Technische Referenz
 

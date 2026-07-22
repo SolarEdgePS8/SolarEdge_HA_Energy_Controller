@@ -1,0 +1,66 @@
+# OPTIONAL: PV-Prognosen eines beliebigen Anbieters auf die vom Controller
+# erwarteten Bedeutungen abbilden.
+#
+# Vor Verwendung anpassen:
+#   sensor.example_forecast_today_kwh
+#   sensor.example_forecast_tomorrow_kwh
+#   sensor.example_forecast_day_after_tomorrow_kwh
+#   sensor.example_forecast_power_now_w
+#   sensor.example_pv_energy_today_kwh
+#
+# Die Quellsensoren müssen bereits die in den Namen angegebenen Einheiten liefern.
+
+template:
+  - sensor:
+      - name: "PV Forecast Today Total Example"
+        unique_id: se_example_pv_forecast_today_total
+        device_class: energy
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        availability: >-
+          {{ states('sensor.example_forecast_today_kwh') not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {{ [states('sensor.example_forecast_today_kwh') | float(0), 0] | max | round(3) }}
+
+      - name: "PV Forecast Today Remaining Example"
+        unique_id: se_example_pv_forecast_today_remaining
+        device_class: energy
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        availability: >-
+          {{ states('sensor.example_forecast_today_kwh') not in ['unknown', 'unavailable', 'none', '']
+             and states('sensor.example_pv_energy_today_kwh') not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {% set forecast = states('sensor.example_forecast_today_kwh') | float(0) %}
+          {% set produced = states('sensor.example_pv_energy_today_kwh') | float(0) %}
+          {{ [forecast - produced, 0] | max | round(3) }}
+
+      - name: "PV Forecast Tomorrow Example"
+        unique_id: se_example_pv_forecast_tomorrow
+        device_class: energy
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        availability: >-
+          {{ states('sensor.example_forecast_tomorrow_kwh') not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {{ [states('sensor.example_forecast_tomorrow_kwh') | float(0), 0] | max | round(3) }}
+
+      - name: "PV Forecast Day After Tomorrow Example"
+        unique_id: se_example_pv_forecast_day_after_tomorrow
+        device_class: energy
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        availability: >-
+          {{ states('sensor.example_forecast_day_after_tomorrow_kwh') not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {{ [states('sensor.example_forecast_day_after_tomorrow_kwh') | float(0), 0] | max | round(3) }}
+
+      - name: "PV Forecast Power Now Example"
+        unique_id: se_example_pv_forecast_power_now
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: "W"
+        availability: >-
+          {{ states('sensor.example_forecast_power_now_w') not in ['unknown', 'unavailable', 'none', ''] }}
+        state: >-
+          {{ [states('sensor.example_forecast_power_now_w') | float(0), 0] | max | round(0) }}

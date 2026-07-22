@@ -1,38 +1,51 @@
-# Erstinstallation
+# Erstinstallation – geführter Ablauf
 
-Diese Anleitung gilt für eine Anlage, auf der der SolarEdge HA Energy Controller noch nicht installiert ist. Für eine bestehende Installation ausschließlich die [Update-Anleitung](05_UPDATE.md) verwenden.
+Diese Anleitung gilt für eine Anlage, auf der der SolarEdge HA Energy Controller noch nicht installiert ist. Bestehende Nutzer verwenden [Update](05_UPDATE.md) oder [Migration](06_MIGRATION.md).
+
+## Was der Installer macht – und was nicht
+
+Der Installer:
+
+- kopiert die 18 Controller-Packages und die Runtime-/Diagnosedateien;
+- installiert den read-only Write-Watchdog;
+- erstellt ein dateibezogenes Backup;
+- ergänzt den Watchdog-Konfigurationsblock genau einmal;
+- führt die Home-Assistant-Konfigurationsprüfung aus;
+- rollt bei einem Fehler automatisch zurück.
+
+Der Installer:
+
+- sucht nicht eigenmächtig die „richtige“ Anlage aus;
+- trägt keine bestätigte Standortkonfiguration ein;
+- aktiviert weder EVOpt noch den Controller-Master;
+- installiert keine Wetter-, Forecast-, evcc- oder Strompreis-Integration;
+- überschreibt keine privaten Automationen außerhalb der Projektdateien.
 
 ## 1. Voraussetzungen
 
-Vor Beginn müssen erfüllt sein:
-
 - vollständiges Home-Assistant-Backup;
-- Terminal-/SSH-Zugriff auf `/share` und `/config`;
-- aktivierte Packages;
-- bekannte SolarEdge-Ziel-Entities und Pflichtsensoren;
-- keine ungeklärte zweite Automation auf demselben Charge-Limit.
+- Zugriff auf `/config` und ein Backup-Verzeichnis, bei OS/Supervised `/share`;
+- Packages aktiviert:
 
-Packages müssen eingebunden sein:
+  ```yaml
+  homeassistant:
+    packages: !include_dir_named packages
+  ```
 
-```yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
+- SolarEdge-Modbus-Integration verbunden;
+- Charge-Limit-Entity vorhanden und noch nicht von einer anderen Automation gesteuert;
+- Pflichtdaten oder ein Plan, wie fehlende Sensoren erzeugt werden.
 
-Danach:
+Details: [Voraussetzungen](01_REQUIREMENTS.md).
 
-```bash
-ha core check
-```
+## 2. Release herunterladen und prüfen
 
-## 2. Release-Dateien nach `/share` kopieren
+Dateien nach `/share` kopieren:
 
 ```text
 SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip
 SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
 ```
-
-## 3. Prüfsumme kontrollieren
 
 ```bash
 cd /share
@@ -45,9 +58,9 @@ Erwartet:
 SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip: OK
 ```
 
-Bei `FAILED` nicht installieren.
+Bei `FAILED` abbrechen.
 
-## 4. In einen leeren Ordner entpacken
+## 3. In einen leeren Ordner entpacken
 
 ```bash
 rm -rf /share/se_controller_release_rc4
@@ -57,182 +70,155 @@ unzip -q /share/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip \
 cd /share/se_controller_release_rc4/SolarEdge_HA_Energy_Controller
 ```
 
-## 5. Installieren
+## 4. Dateien installieren
 
 ```bash
 bash scripts/install_package.sh
 ```
 
-Der Installer:
+Der Installer zeigt am Ende:
 
-- schaltet bei einer bestehenden Installation zuerst den Controller-Master aus;
-- erstellt ein dateibezogenes Backup unter `/share/se_controller_backup_<Zeitstempel>`;
-- kopiert 18 Package-YAMLs nach `/config/packages`;
-- kopiert fünf Runtime-/Audit-Dateien nach `/config`;
-- installiert den read-only Write-Watchdog unter `/config/custom_components/se_write_watchdog`;
-- installiert Bericht und Live-Trace unter `/config/se_write_watchdog_tools`;
-- ergänzt `se_write_watchdog:` genau einmal in `/config/configuration.yaml`;
-- erzeugt ein Runtime-Manifest mit 28 projektverwalteten Dateien;
-- führt `ha core check` aus;
-- rollt bei einem Fehler alle geänderten Dateien einschließlich `configuration.yaml` zurück;
-- lässt den Controller-Master ausgeschaltet.
+- Backup-Pfad;
+- Ergebnis der HA-Prüfung;
+- Hinweis, dass der Master AUS bleibt;
+- nächste Schritte für Mapping, Neustart und Erstprüfung.
 
-Erwartetes Ende:
-
-```text
-Installationsdateien und Home-Assistant-Konfiguration geprüft.
-Installiert: 18 Package-Dateien, 5 Runtime-/Audit-Dateien, 3 Watchdog-Dateien und 2 Watchdog-Tools.
-Controller-Master bleibt AUS.
-```
-
-Private Packages und Automationen werden nicht gelöscht.
-
-## 6. Home Assistant neu starten
+Dann:
 
 ```bash
 ha core restart
 ```
 
-Direkt nach dem Neustart können Template- oder Command-Line-Sensoren kurz `unknown`, `unavailable` oder `warming_up` melden.
+Andere Installationsarten: [OS, Supervised, Container und Core](09_INSTALLATION_VARIANTS.md).
 
-## 7. Standortkonfiguration erstellen
+## 5. Sensoren finden – read-only
 
-```bash
-cp config/site_config.env.example config/site_config.env
-```
-
-Pflichtfelder eintragen:
-
-```dotenv
-CHARGE_LIMIT_ENTITY=number.example_storage_charge_limit
-BATTERY_SOC_ENTITY=sensor.example_battery_soc
-BATTERY_CAPACITY_KWH=14.0
-PV_FORECAST_TODAY_REMAINING_ENTITY=sensor.example_pv_today_remaining
-PV_FORECAST_TODAY_TOTAL_ENTITY=sensor.example_pv_today_total
-PV_FORECAST_TOMORROW_ENTITY=sensor.example_pv_tomorrow
-LIVE_PV_POWER_ENTITIES=sensor.example_pv_power
-LIVE_CONSUMPTION_POWER_ENTITIES=sensor.example_house_consumption_power
-```
-
-Wichtig:
-
-- Charge-Limit muss ein schreibbares `number.*` in Watt sein;
-- Live-PV und Verbrauch erwarten Leistung in **W**, keine Energiezähler in `kWh`;
-- `_filtered` ist nur ein möglicher Sensorname und keine Voraussetzung;
-- optionale Writer-Mappings bleiben leer, wenn sie nicht verwendet werden.
-
-### EVOpt optional aktivieren
-
-```dotenv
-EVOPT_ENABLED=YES
-EVOPT_BASE_URL=http://evcc-host:7070
-EVOPT_BATTERY_TITLE=SolarEdge Akku
-EVOPT_BATTERY_NAME=
-EVOPT_BATTERY_MODE_ENTITY=
-```
-
-Die Basis-URL endet nicht auf `/api` und nicht auf `/api/state`.
-
-Prüfung:
+Nach dem Neustart:
 
 ```bash
-curl -fsS http://evcc-host:7070/api/state \
-  | python3 -c "import json,sys; data=json.load(sys.stdin); print('EVCC_API=OK', 'evopt' in data)"
+python3 scripts/discover_entities.py \
+  --report /share/se_controller_mapping_report.json \
+  --output config/site_config.env
 ```
 
-## 8. Standort bestätigen und anwenden
+Der Assistent liest ausschließlich HA-States. Er ändert nichts in Home Assistant. Die Datei enthält weiterhin:
 
-Erst nach vollständiger Prüfung setzen:
+```dotenv
+SITE_CONFIG_CONFIRMED=NO
+EVOPT_ENABLED=NO
+```
+
+Öffne anschließend:
+
+```text
+config/site_config.env
+```
+
+und prüfe jeden Vorschlag anhand der [Entity-Mapping-Anleitung](03_ENTITY_MAPPING.md) und der [Sensorquellen](12_SENSOR_SOURCES_AND_EXAMPLES.md).
+
+## 6. Fehlende Sensoren ergänzen
+
+Häufige Fälle:
+
+- SolarEdge liefert Charge-Limit, Batterie-SoE und AC-Leistung direkt;
+- Hausverbrauch kommt aus einem Smart Meter oder Power-Flow-Sensor;
+- PV-Prognosen kommen aus Forecast.Solar, Solcast oder einem anderen Anbieter;
+- „heute verbleibend“ wird aus Tagesprognose minus PV-Ertrag heute gebildet;
+- Wetter kommt aus einer `weather.*`-Integration;
+- evcc/ha-evcc ist nur für EVOpt beziehungsweise zusätzliche Anzeige nötig;
+- Strompreis- und Kostensensoren sind optional und nicht Teil des Pflichtmappings.
+
+Optionale YAML-Bausteine: [`examples/sensors`](../examples/sensors/README.md).
+
+Nach jedem selbst gebauten Sensor:
+
+```bash
+ha core check
+ha core restart
+```
+
+Anschließend Einheit und Aktualisierung in **Entwicklerwerkzeuge → Zustände** prüfen.
+
+## 7. Private Standortkonfiguration bestätigen
+
+Erst wenn alle Pflichtfelder fachlich geprüft sind:
 
 ```dotenv
 SITE_CONFIG_CONFIRMED=YES
 ```
 
-Dann:
+EVOpt bleibt zunächst aus, sofern der Optimizer noch nicht vollständig geprüft wurde:
+
+```dotenv
+EVOPT_ENABLED=NO
+```
+
+Konfiguration anwenden:
 
 ```bash
 python3 scripts/apply_site_config.py config/site_config.env
 ```
 
-Der Master bleibt dabei aus.
+Das Skript lässt den Controller-Master AUS.
 
-## 9. Erstprüfung
+## 8. Erste Prüfungen
 
 ```bash
 bash scripts/run_first_checks.sh
-```
-
-Erwartet:
-
-```text
-[OK] Runtime-Manifest Version: 0.1.0-rc.4
-[OK] Installierte Dateien unverändert: {'checked': 28, 'errors': []}
-[OK] Standortkonfiguration bestätigt: on
-[OK] Config Check: ok
-[OK] Sanity Check: ok
-FEHLER=0 WARNUNGEN=0 PASS=True
-```
-
-Bei `PASS=False` den Master nicht einschalten.
-
-## 10. Modus wählen
-
-```text
-Eigenverbrauch maximieren
-Netzdienlich laden
-Akku schonen
-EVOpt optimiert
-```
-
-Im Modus EVOpt nach dem Warm-up prüfen:
-
-```text
-sensor.se_nf_evopt_status = healthy
-binary_sensor.se_nf_evopt_active_control = on
-sensor.se_nf_evopt_candidate_source = evopt
-```
-
-Während des Start-Warm-ups hält RC4 den zuletzt bestätigten SolarEdge-Zustand. Es wird nicht vorzeitig auf `5000 W` geöffnet.
-
-## 11. Master einschalten
-
-Erst nach `PASS=True`:
-
-```text
-input_boolean.se_netzdienlich_enabled = on
-```
-
-Kontrollieren:
-
-```text
-input_boolean.se_nf_site_config_confirmed = on
-sensor.se_nf_config_check = ok
-sensor.se_nf_sanity_check = ok
-binary_sensor.se_nf_controller_write_enabled = on
-```
-
-## 12. Watchdog prüfen
-
-```bash
+python3 scripts/check_external_writer_conflicts.py "${CONFIG_ROOT:-/config}"
 /config/se_write_watchdog_tools/report.sh 200
 ```
 
 Erwartet:
 
 ```text
-possible writers = 1
-unexpected writer = 0
-roundtrips = 0
-evopt mismatch = 0
+PASS=True
+sensor.se_nf_config_check=ok
+sensor.se_nf_sanity_check=ok
 ```
 
-Details: [Write-Watchdog](10_WRITE_WATCHDOG.md).
+Jeder gemeldete fremde Writer muss vor der Aktivierung geklärt werden.
 
-## 13. Rollback
+## 9. EVOpt optional aktivieren
+
+Nur für den Modus `EVOpt optimiert`:
 
 ```bash
-bash scripts/rollback.sh "$(cat /share/se_controller_last_backup.txt)"
-ha core restart
+curl -fsS http://EVCC-HOST:7070/api/state \
+  | python3 -c "import json,sys; data=json.load(sys.stdin); print('EVCC_API=OK', 'evopt' in data)"
 ```
 
-Der Rollback stellt ersetzte Dateien wieder her, entfernt neu angelegte Projektdateien, stellt `configuration.yaml` wieder her und lässt den Master ausgeschaltet.
+Dann Batterietitel/-name prüfen, `EVOPT_ENABLED=YES` setzen und die Standortkonfiguration erneut anwenden. Die Home-Assistant-Integration `ha-evcc` ist dafür nicht zwingend erforderlich.
+
+## 10. Master einschalten
+
+Erst wenn alle Prüfungen grün sind:
+
+```text
+input_boolean.se_netzdienlich_enabled → EIN
+```
+
+Danach mindestens beobachten:
+
+```text
+sensor.se_nf_active_control_label
+sensor.se_nf_desired_target
+sensor.se_nf_charge_limit_actual
+sensor.se_write_watchdog_status
+```
+
+## 11. Rollback
+
+Der aktuelle Backup-Pfad steht in:
+
+```text
+/share/se_controller_last_backup.txt
+```
+
+Rollback:
+
+```bash
+bash scripts/rollback.sh
+```
+
+Der Master bleibt auch nach dem Rollback AUS.
