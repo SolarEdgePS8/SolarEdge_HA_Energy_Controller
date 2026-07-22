@@ -36,9 +36,6 @@ jobs:
           parts = sorted(Path('.deep-testbench-payload').glob('chunk_*.b64'))
           if not parts:
               raise SystemExit('Keine Payload-Teile gefunden')
-          print('Payload-Reihenfolge:')
-          for part in parts:
-              print(f'  {part.name}: {part.stat().st_size} Bytes')
           encoded = b''.join(part.read_bytes() for part in parts)
           archive = base64.b64decode(encoded)
           digest = hashlib.sha256(archive).hexdigest()
@@ -50,12 +47,17 @@ jobs:
           PY
           unzip -t /tmp/deep-testbench.zip
           unzip -oq /tmp/deep-testbench.zip -d .
+
+          # GitHub Actions darf mit seinem Laufzeittoken keine neue Workflow-Datei pushen.
+          # Der dauerhafte Deep-Workflow wird nach diesem Commit separat über die
+          # GitHub-App mit Workflow-Berechtigung angelegt.
+          rm -f .github/workflows/deep-testbench.yml
           rm -rf .deep-testbench-payload
           rm -f .github/workflows/apply-deep-testbench-once.yml
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f -name '*.pyc' -delete
 
-      - name: Commit complete testbench
+      - name: Commit complete testbench without workflow file
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,24 +66,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-
-          set +e
-          git commit -m "Test: Codespaces und mehrstufigen Deep Testbench ergänzen" \
-            > /tmp/commit.log 2>&1
-          commit_rc=$?
-          set -e
-          cat /tmp/commit.log
-          if [ "$commit_rc" -ne 0 ]; then
-            {
-              echo '## Automatischer Payload-Commit fehlgeschlagen'
-              echo
-              echo '```text'
-              cat /tmp/commit.log
-              echo '```'
-            } > /tmp/issue-comment.md
-            gh issue comment 22 --body-file /tmp/issue-comment.md
-            exit "$commit_rc"
-          fi
+          git commit -m "Test: Codespaces und mehrstufigen Deep Testbench ergänzen"
 
           set +e
           git push origin HEAD:test/deep-codespaces-testbench \
