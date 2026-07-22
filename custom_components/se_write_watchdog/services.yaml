@@ -1,0 +1,18 @@
+reset_counters:
+  name: Reset watchdog counters
+  description: Reset daily counters and current watchdog flags.
+rescan:
+  name: Rescan possible writers
+  description: Scan Home Assistant YAML and Python files for possible charge-limit writers.
+mark_test:
+  name: Add test marker
+  description: Add a timestamped test marker and state snapshot to the JSONL audit log.
+  fields:
+    note:
+      name: Note
+      description: Free text describing the test.
+      required: false
+      example: "EVOpt holdcharge test"
+dump_report:
+  name: Dump watchdog report
+  description: Write a complete report to /config/se_write_watchdog/report.json.

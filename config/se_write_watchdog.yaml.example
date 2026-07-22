@@ -1,0 +1,14 @@
+se_write_watchdog:
+  watched_entity: number.solaredge_i1_storage_charge_limit
+  mapping_helper: input_text.se_nf_charge_limit_entity
+  allowed_writers:
+    - automation.solaredge_netzdienlich_v2_8_single_writer
+  intent_event: se_charge_limit_write_intent
+  rapid_window_seconds: 180
+  burst_window_seconds: 600
+  burst_change_count: 4
+  flap_hold_seconds: 1800
+  mismatch_grace_seconds: 30
+  correlation_window_seconds: 30
+  retention_days: 14
+  notifications: true
