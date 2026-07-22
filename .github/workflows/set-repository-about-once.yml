@@ -1,0 +1,28 @@
+name: Set repository About once
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  set-about:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'maintenance/set-repository-about'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set repository description and homepage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESCRIPTION: Portabler Home-Assistant-Controller für SolarEdge-Batteriespeicher mit vier Modi, EVCC Optimizer, Safety-Arbiter, Single Writer und Write-Watchdog.
+          HOMEPAGE: https://github.com/SolarEdgePS8/SolarEdge_HA_Energy_Controller
+        run: |
+          set -euo pipefail
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}" \
+            -f description="$DESCRIPTION" \
+            -f homepage="$HOMEPAGE"
