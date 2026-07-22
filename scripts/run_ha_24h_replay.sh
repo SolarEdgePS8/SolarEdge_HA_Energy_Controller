@@ -94,6 +94,9 @@ docker run --rm \
   -m homeassistant --script check_config -c /config \
   2>&1 | tee "$ARTIFACTS/check-config.log"
 
+# Start Python directly instead of the image's supervisor entrypoint. Some
+# supervisors sanitize LD_PRELOAD for child services, which would make the
+# accelerated wall clock ineffective and invalidate time-sensitive assertions.
 docker run -d \
   -e PYTHONPATH=/config \
   -e TZ=Europe/Berlin \
@@ -103,10 +106,12 @@ docker run -d \
   -e FAKETIME_DONT_FAKE_MONOTONIC=1 \
   -e FAKETIME_DONT_RESET=1 \
   -e NO_FAKE_STAT=1 \
+  --entrypoint python \
   --name "$CONTAINER" \
   -p "127.0.0.1:${PORT}:8123" \
   -v "$CONFIG:/config" \
-  "$HA_TEST_IMAGE" >/dev/null
+  "$HA_TEST_IMAGE" \
+  -m homeassistant -c /config >/dev/null
 
 ready=0
 for _ in $(seq 1 "$TIMEOUT"); do
