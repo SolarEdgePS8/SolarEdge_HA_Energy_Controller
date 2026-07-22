@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Installer-Backups werden mit einem eindeutigen `mktemp`-Suffix erzeugt; mehrere Installations- oder Rollbacktests innerhalb derselben Sekunde können sich nicht mehr gegenseitig überschreiben;
+- CI erzwingt denselben Zeitstempel für mehrere Installationsläufe und prüft die Kollisionssicherheit deterministisch;
+- GitHub Actions auf Node-24-fähige Versionen aktualisiert: `checkout@v6`, `setup-python@v6` und `upload-artifact@v6`;
+- keine Änderungen an den 18 produktiven Package-YAMLs oder an der Controller-Laufzeitlogik.
+
 ## v0.1.0-rc.4
 
 - realen Startup-Zyklus `0 → 5000 → 0` analysiert und als Handover-Problem des einzigen Charge-Limit-Writers identifiziert;
