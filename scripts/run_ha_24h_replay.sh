@@ -68,6 +68,10 @@ cp "$ROOT/testbench/fixtures/real_day_2026-07-21_15m.json" \
   "$CONFIG/testbench/real_day_2026-07-21_15m.json"
 cp -a "$ROOT/testbench/custom_components/se_test_replay" \
   "$CONFIG/custom_components/se_test_replay"
+# Keep simulated time safely before real entity timestamps, so freshness checks
+# exercise the production formulas without being tripped by the accelerated clock.
+sed -i 's/datetime(2031, 7, 21/datetime(2024, 7, 15/g' \
+  "$CONFIG/custom_components/se_test_replay/__init__.py"
 
 # Validate the exact installed main production packages plus the test-only replay.
 docker run --rm \
