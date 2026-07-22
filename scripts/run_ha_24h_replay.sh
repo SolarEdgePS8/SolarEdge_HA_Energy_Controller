@@ -14,6 +14,8 @@ CONTAINER="se-controller-ha-24h-$$"
 START_EPOCH="$(date +%s)"
 mkdir -p "$CONFIG/packages" "$CONFIG/custom_components" "$CONFIG/testbench" "$SHARE" "$ARTIFACTS"
 
+# Called indirectly through the EXIT trap.
+# shellcheck disable=SC2317
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   sudo rm -rf "$TMP" >/dev/null 2>&1 || true
