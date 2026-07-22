@@ -1,0 +1,21 @@
+# OPTIONAL: geglättete PV-Momentanleistung.
+#
+# Vor Verwendung anpassen:
+#   sensor.example_pv_power_raw -> eigener PV-Leistungssensor in W
+#
+# Der Filter kann kurze Spitzen und Ausreißer reduzieren, erzeugt aber Verzögerung.
+# Für schnelle Reaktionen die Rohquelle in LIVE_PV_POWER_ENTITIES normalerweise
+# vor dem gefilterten Sensor eintragen.
+
+sensor:
+  - platform: filter
+    name: "PV Power Filtered Example"
+    unique_id: se_example_pv_power_filtered
+    entity_id: sensor.example_pv_power_raw
+    filters:
+      - filter: outlier
+        window_size: 4
+        radius: 4000.0
+      - filter: time_simple_moving_average
+        window_size: "00:01"
+        precision: 0
