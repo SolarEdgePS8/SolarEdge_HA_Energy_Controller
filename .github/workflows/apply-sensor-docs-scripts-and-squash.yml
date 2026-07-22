@@ -4,13 +4,17 @@ on:
   push:
     branches:
       - docs/sensor-sources-portable-mapping
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   apply-and-squash:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' || github.head_ref == 'docs/sensor-sources-portable-mapping')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout documentation branch
