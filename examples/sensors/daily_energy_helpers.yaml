@@ -1,0 +1,43 @@
+# OPTIONAL: aus Momentanleistung in W Energie in kWh und Tageszähler erzeugen.
+#
+# Vor Verwendung anpassen:
+#   sensor.example_pv_power_w          -> PV-Leistung in W
+#   sensor.example_consumption_power_w -> Hausverbrauch in W
+#
+# Ein echter Energiezähler der Hardware ist genauer und sollte bevorzugt werden.
+
+sensor:
+  - platform: integration
+    source: sensor.example_pv_power_w
+    name: "PV Energy Total Example"
+    unique_id: se_example_pv_energy_total
+    unit_prefix: k
+    unit_time: h
+    round: 3
+    method: left
+    max_sub_interval:
+      minutes: 5
+
+  - platform: integration
+    source: sensor.example_consumption_power_w
+    name: "Consumption Energy Total Example"
+    unique_id: se_example_consumption_energy_total
+    unit_prefix: k
+    unit_time: h
+    round: 3
+    method: left
+    max_sub_interval:
+      minutes: 5
+
+utility_meter:
+  pv_energy_today_example:
+    name: "PV Energy Today Example"
+    unique_id: se_example_pv_energy_today
+    source: sensor.pv_energy_total_example
+    cycle: daily
+
+  consumption_energy_today_example:
+    name: "Consumption Energy Today Example"
+    unique_id: se_example_consumption_energy_today
+    source: sensor.consumption_energy_total_example
+    cycle: daily
