@@ -37,7 +37,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          for root in [Path("audit"), Path("scripts"), Path("tests"), Path("custom_components")]:
+          for root in [Path("audit"), Path("scripts"), Path("tests"), Path("testbench"), Path("custom_components")]:
               for path in root.rglob("*.py"):
                   compile(path.read_text(encoding="utf-8"), str(path), "exec")
           PY
@@ -47,7 +47,7 @@ jobs:
         run: find scripts audit tools -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
       - name: Mode, writer, watchdog and live-parity contracts
-        run: pytest -q -p no:cacheprovider
+        run: python -m pytest -q -p no:cacheprovider
 
       - name: Installer portability, manifest, watchdog and rollback simulation
         shell: bash
