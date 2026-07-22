@@ -1,0 +1,26 @@
+name: Cleanup merged RC4 branches
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.head_ref == 'release/v0.1.0-rc.4-publish'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete completed RC4 branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE \
+            "repos/${GH_REPO}/git/refs/heads/release/v0.1.0-rc.4"
+          gh api --method DELETE \
+            "repos/${GH_REPO}/git/refs/heads/release/v0.1.0-rc.4-publish"
