@@ -4,13 +4,14 @@
 
 Der Deep Testbench prüft den SolarEdge HA Energy Controller außerhalb einer realen Anlage. Er bildet die Betriebslogik der Referenzinstallation mit neutralen Testdaten nach und ergänzt die bestehenden Release-, Installer- und Paritätstests.
 
-Die Testumgebung verbindet fünf Ebenen:
+Die Testumgebung verbindet sechs Ebenen:
 
-1. statische Architektur- und Datenschutzprüfungen;
+1. statische Architektur-, Syntax- und Datenschutzprüfungen;
 2. ein unabhängiges Python-Referenzmodell;
 3. feste Tag-/Nacht-/PV-/SoC-/Forecast-Szenarien;
-4. Property- und Fake-Time-Zustandsmaschinentests;
-5. einen Home-Assistant-Container-Smoke-Test und das tatsächliche Release-ZIP.
+4. Property-, Grenzwert- und Fake-Time-Zustandsmaschinentests;
+5. einen umschaltbaren Fake-evcc-Server;
+6. einen Home-Assistant-Container-Test sowie das tatsächliche Release-ZIP.
 
 Es wird niemals eine Verbindung zur produktiven SolarEdge- oder Home-Assistant-Instanz hergestellt.
 
@@ -20,8 +21,8 @@ Die Datei `.devcontainer/devcontainer.json` legt Python, Docker, ShellCheck, YAM
 
 ## Codespace öffnen
 
-1. Repository öffnen.
-2. **Code → Codespaces → Create codespace on main** wählen.
+1. Repository oder den Test-Branch öffnen.
+2. **Code → Codespaces → Create codespace** wählen.
 3. Warten, bis `postCreateCommand` abgeschlossen ist.
 4. Im Terminal ausführen:
 
@@ -29,7 +30,7 @@ Die Datei `.devcontainer/devcontainer.json` legt Python, Docker, ShellCheck, YAM
 bash scripts/run_deep_tests.sh all
 ```
 
-Für den Home-Assistant-Container-Smoke-Test:
+Für den vollständigen Home-Assistant-Container-Test:
 
 ```bash
 bash scripts/run_ha_smoke.sh
@@ -50,7 +51,7 @@ Ports:
 
 ## Testdaten
 
-Die Datei `tests/fixtures/controller_scenarios.yaml` enthält feste, künstliche Szenarien für:
+Die Datei `tests/fixtures/controller_scenarios.yaml` enthält 29 feste, künstliche Szenarien für:
 
 - Eigenverbrauch maximieren;
 - Netzdienlich laden;
@@ -63,6 +64,24 @@ Die Datei `tests/fixtures/controller_scenarios.yaml` enthält feste, künstliche
 - Writer-Stabilität, Cooldown und identische Sollwerte.
 
 Alle Werte sind synthetisch. Die verwendete neutrale Referenzkapazität von `24.25 kWh` dient nur dazu, das Verhalten der geprüften Referenzinstallation nachzubilden; sie ist kein allgemeiner Standardwert.
+
+Zusätzlich prüft `tests/deep/test_cross_mode_matrix.py` 9.600 deterministische Snapshots aus:
+
+```text
+4 Betriebsarten
+× 4 Tageszeiten
+× 6 SoC-Stufen
+× 5 PV-Leistungsstufen
+× 4 Verbrauchsstufen
+× 4 Prognosestufen
+× EVOpt normal/holdcharge im EVOpt-Modus
+```
+
+Eine weitere Sequenz schaltet alle vier Modi nacheinander um und erwartet ausschließlich die kontrollierte synthetische Write-Folge:
+
+```text
+5000 W → 0 W → 5000 W → 0 W
+```
 
 ## Referenzmodell
 
@@ -86,16 +105,16 @@ Hypothesis erzeugt Kombinationen aus:
 
 ```text
 4 Modi
-SoC 0…100 %
-Kapazität 0.1…100 kWh
-PV und Verbrauch 0…30 kW
-Prognose 0…150 kWh
+SoC innerhalb und außerhalb 0…100 %
+Kapazität innerhalb und außerhalb gültiger Bereiche
+PV und Verbrauch bis 30 kW
+Prognosen bis 150 kWh und ungültige negative Werte
 EVOpt-Aktionen und Health-Zustände
 Tag- und Nachtzeiten
 0- und 5000-W-Ausgangszuständen
 ```
 
-Zusätzlich werden ungültige Werte bis außerhalb der zulässigen Bereiche erzeugt. Globale Invarianten:
+Globale Invarianten:
 
 ```text
 0 <= Ziel <= 5000 W
@@ -116,7 +135,9 @@ keine Exception bei ungültigen Messwerten
 - zusätzliche 90 Sekunden Stabilität vor permissiver Öffnung;
 - `holdcharge` bleibt 180 Sekunden gelatcht;
 - restriktives Schließen ignoriert Cooldown;
-- Tages-/Fensterende erzeugt genau einen Schließvorgang.
+- Tages-/Fensterende erzeugt genau einen Schließvorgang;
+- Recovery nach EVOpt-Ausfall;
+- Moduswechsel während einer laufenden Write-Sequenz.
 
 ## Fake evcc
 
@@ -132,6 +153,9 @@ missing_evopt
 multiple_batteries
 not_controllable
 invalid_json
+http_404
+http_500
+timeout
 ```
 
 Beispiel:
@@ -142,19 +166,40 @@ curl http://127.0.0.1:7070/api/state
 curl -X POST http://127.0.0.1:7070/__scenario/normal
 ```
 
-## Home-Assistant-Smoke-Test
+## Home-Assistant-Container-Test
 
 `scripts/run_ha_smoke.sh`:
 
 1. erstellt eine temporäre neutrale HA-Konfiguration;
 2. installiert die echten Projektdateien mit dem portablen Installer;
-3. führt `check_config` mit dem gepinnten Home-Assistant-Image `2026.7.3` aus;
-4. startet denselben Stand als Container;
-5. wartet auf die HTTP-Bereitschaft;
-6. prüft auf fatale Konfigurations- und Watchdog-Setupfehler;
-7. speichert Installer-, Check- und HA-Logs als Artefakte.
+3. ergänzt ausschließlich für den Test eine synthetische Runtime-Datei;
+4. führt `check_config` mit dem gepinnten Home-Assistant-Image `2026.7.3` aus;
+5. startet denselben Stand als Container;
+6. mappt Batterie, PV, Verbrauch, Prognose und Charge-Limit auf synthetische Entities;
+7. schaltet alle vier Betriebsarten in der echten Home-Assistant-Package-Laufzeit um;
+8. prüft `config_check=ok`, `sanity_check=ok` und einen nach dem Test ausgeschalteten Master;
+9. speichert Installer-, Check-, Home-Assistant- und Ergebnislogs als Artefakte.
 
-Dieser Test prüft Startbarkeit und Installation, aber keine reale SolarEdge-Modbus-Kommunikation. Firmware-, Register- und Geräteeffekte bleiben Bestandteil der kontrollierten Hardware-Abnahme.
+Die synthetische Writer-Entity lautet:
+
+```text
+number.test_storage_charge_limit
+```
+
+Sie hat keine Verbindung zu Modbus oder realer Hardware.
+
+Der erfolgreiche Referenzlauf vom 22.07.2026 ergab:
+
+| Modus | effektiver Modus | aktive Steuerung | Ziel |
+|---|---|---|---:|
+| Eigenverbrauch maximieren | Eigenverbrauch maximieren | Eigenverbrauch | 5000 W |
+| Netzdienlich laden | Netzdienlich laden | Netzdienliche Planung | 0 W |
+| Akku schonen | Akku schonen | Akku schonen | 0 W |
+| EVOpt optimiert | EVOpt optimiert | Netzdienlicher Fallback | 0 W |
+
+EVOpt läuft in diesem Container bewusst ohne externe API-Verbindung und muss deshalb sauber auf die netzdienliche Ersatzplanung zurückfallen. Die echte EVOpt-Aktionsmatrix wird separat gegen den Fake-evcc-Server und im Referenzmodell geprüft.
+
+Dieser Test prüft die tatsächliche Home-Assistant-Konfiguration, Entity-Erzeugung, Modusumschaltung und Controller-Arbitration. Er prüft keine reale SolarEdge-Modbus-Kommunikation. Firmware-, Register- und Geräteeffekte bleiben Bestandteil der kontrollierten Hardware-Abnahme.
 
 ## GitHub Actions
 
@@ -171,6 +216,25 @@ deep-release-gate
 
 Der abschließende Gate-Job wird nur grün, wenn alle vorherigen Stufen erfolgreich sind.
 
+## Verifizierter Teststand
+
+Für den geprüften Pull-Request-Stand waren erfolgreich:
+
+```text
+29 / 29 feste Szenarien
+9.600 deterministische Vier-Modi-Snapshots
+52 Python-Modell-, Property- und Zustandsmaschinentests
+98,06 % Line-Coverage des unabhängigen Referenzmodells
+alle Fake-evcc-Aktionen und Transportfehler
+Home Assistant 2026.7.3 check_config und Runtime-Start
+alle vier Modi in der HA-Package-Laufzeit umgeschaltet
+Config Check: ok
+Sanity Check: ok
+Master nach dem Test: aus
+Release-ZIP, SHA256 und Manifest: PASS
+Deep Release Gate: PASS
+```
+
 ## Artefakte
 
 Je nach Job werden hochgeladen:
@@ -178,6 +242,7 @@ Je nach Job werden hochgeladen:
 ```text
 readonly_audit.txt
 ruff.txt
+shellcheck.txt
 *-junit.xml
 scenario_report.json
 coverage.xml
@@ -213,6 +278,7 @@ Der Deep Testbench kann nicht beweisen, dass jede SolarEdge-Firmware Register id
 - gerätespezifische Flash-Persistenz;
 - Wechselrichter-/Batterie-Firmwareabweichungen;
 - reale Messwertverzögerungen anderer Integrationen;
+- reale EVOpt-Pläne mit der produktiven evcc-Instanz;
 - Netz- und Hardwareausfälle außerhalb der definierten Fehlerbilder.
 
 Dafür bleibt der dokumentierte Hardware-Abnahmetest erforderlich.
