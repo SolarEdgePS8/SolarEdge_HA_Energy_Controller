@@ -34,6 +34,7 @@ run_model() {
     --output "$ARTIFACTS/scenario_report.json"
   python -m pytest -q \
     tests/deep/test_scenario_matrix.py \
+    tests/deep/test_cross_mode_matrix.py \
     tests/deep/test_properties.py \
     tests/deep/test_state_machine.py \
     --junitxml="$ARTIFACTS/model-junit.xml" \
