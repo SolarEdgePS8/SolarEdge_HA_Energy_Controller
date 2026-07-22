@@ -23,12 +23,30 @@ jobs:
         with:
           ref: test/deep-codespaces-testbench
 
-      - name: Decode and apply testbench payload
+      - name: Decode, verify and apply testbench payload
         shell: bash
         run: |
           set -Eeuo pipefail
-          cat .deep-testbench-payload/chunk_*.b64 > /tmp/deep-testbench.b64
-          base64 -d /tmp/deep-testbench.b64 > /tmp/deep-testbench.zip
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import hashlib
+
+          parts = sorted(Path('.deep-testbench-payload').glob('chunk_*.b64'))
+          if not parts:
+              raise SystemExit('Keine Payload-Teile gefunden')
+          print('Payload-Reihenfolge:')
+          for part in parts:
+              print(f'  {part.name}: {part.stat().st_size} Bytes')
+          encoded = b''.join(part.read_bytes() for part in parts)
+          archive = base64.b64decode(encoded)
+          digest = hashlib.sha256(archive).hexdigest()
+          expected = 'e64be97e5f3742fd2a4a73120bddf6686617506e5a492c39e05ea65999db6765'
+          print(f'Payload-SHA256: {digest}')
+          if digest != expected:
+              raise SystemExit(f'Payload-SHA256 falsch: {digest} != {expected}')
+          Path('/tmp/deep-testbench.zip').write_bytes(archive)
+          PY
           unzip -t /tmp/deep-testbench.zip
           unzip -oq /tmp/deep-testbench.zip -d .
           rm -rf .deep-testbench-payload
