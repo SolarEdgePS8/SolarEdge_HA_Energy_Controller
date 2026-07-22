@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   apply:
@@ -56,10 +57,46 @@ jobs:
 
       - name: Commit complete testbench
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "Test: Codespaces und mehrstufigen Deep Testbench ergänzen"
-          git push origin HEAD:test/deep-codespaces-testbench
+
+          set +e
+          git commit -m "Test: Codespaces und mehrstufigen Deep Testbench ergänzen" \
+            > /tmp/commit.log 2>&1
+          commit_rc=$?
+          set -e
+          cat /tmp/commit.log
+          if [ "$commit_rc" -ne 0 ]; then
+            {
+              echo '## Automatischer Payload-Commit fehlgeschlagen'
+              echo
+              echo '```text'
+              cat /tmp/commit.log
+              echo '```'
+            } > /tmp/issue-comment.md
+            gh issue comment 22 --body-file /tmp/issue-comment.md
+            exit "$commit_rc"
+          fi
+
+          set +e
+          git push origin HEAD:test/deep-codespaces-testbench \
+            > /tmp/push.log 2>&1
+          push_rc=$?
+          set -e
+          cat /tmp/push.log
+          if [ "$push_rc" -ne 0 ]; then
+            {
+              echo '## Automatischer Payload-Push fehlgeschlagen'
+              echo
+              echo '```text'
+              cat /tmp/push.log
+              echo '```'
+            } > /tmp/issue-comment.md
+            gh issue comment 22 --body-file /tmp/issue-comment.md
+            exit "$push_rc"
+          fi
