@@ -13,11 +13,13 @@ CONTAINER="se-controller-ha-smoke-$$"
 START_EPOCH="$(date +%s)"
 mkdir -p "$CONFIG/packages" "$SHARE" "$ARTIFACTS"
 
-# Wird indirekt durch den EXIT-Trap aufgerufen.
+# Wird indirekt durch den EXIT-Trap aufgerufen. Home Assistant legt im
+# gemounteten Testordner Dateien als root an; deren Bereinigung darf den
+# fachlich erfolgreichen Test nicht nachträglich fehlschlagen lassen.
 # shellcheck disable=SC2317
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  rm -rf "$TMP"
+  sudo rm -rf "$TMP" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -106,6 +108,4 @@ path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(json.dumps(report, indent=2))
 PY
 
-# Verhindert, dass ein vorangegangener absichtlich negativer grep-Status den
-# erfolgreichen Smoke-Test als Shell-Fehler nach außen trägt.
 exit 0
