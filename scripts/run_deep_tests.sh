@@ -18,10 +18,11 @@ run_static() {
   find scripts audit tools -type f -name '*.sh' -print0 \
     | xargs -0 -r -n1 bash -n
   if command -v shellcheck >/dev/null 2>&1; then
-    shellcheck -x \
+    shellcheck -x -f gcc \
       scripts/run_deep_tests.sh \
       scripts/run_ha_smoke.sh \
-      .devcontainer/post-create.sh
+      .devcontainer/post-create.sh \
+      | tee "$ARTIFACTS/shellcheck.txt"
   fi
   python -m pytest -q tests/deep/test_architecture_contracts.py \
     --junitxml="$ARTIFACTS/static-junit.xml" \
