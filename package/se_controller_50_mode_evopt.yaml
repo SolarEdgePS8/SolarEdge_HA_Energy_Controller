@@ -7,12 +7,10 @@ input_boolean:
   se_nf_evopt_shadow_enabled:
     name: EVOpt-Integration aktiviert
     icon: mdi:weather-night-partly-cloudy
-    initial: false
 input_text:
   se_nf_evopt_base_url:
     name: SE NF EVOpt Basis-URL
     icon: mdi:web
-    initial: "http://example.invalid:7070"
     min: 1
     max: 255
   se_nf_evopt_battery_title:
@@ -222,8 +220,10 @@ template:
         state: >-
           {{ is_state('binary_sensor.se_nf_evopt_shadow_ready', 'on')
              and states('sensor.se_nf_evopt_action_raw') == 'holdcharge' }}
+        # Restriktiv sofort, Freigabe erst nach stabiler Gegenentscheidung.
+        # Überbrückt kurze Adapter-/Health-Lücken und verhindert 0→5000→0-Pulse.
         delay_off:
-          seconds: 60
+          seconds: 180
       - name: SE NF EVOpt Differs From Legacy
         unique_id: se_nf_evopt_differs_from_legacy
         icon: mdi:compare-horizontal
@@ -584,14 +584,52 @@ template:
 
           {% set source = states('sensor.se_nf_evopt_candidate_source') %}
 
+          {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+
           {% set action_raw = states('sensor.se_nf_evopt_action_raw') %}
 
           {% set charge_block = is_state('binary_sensor.se_nf_evopt_charge_block_request', 'on') %}
 
-          {% if source == 'evopt' and (action_raw == 'holdcharge' or charge_block) %}
+          {# Bei einem kurzen EVOpt-Ausfall wird der zuletzt bestätigte
+             SolarEdge-Zustand gehalten. Erst nach 20 Minuten durchgehendem
+             Fallback darf die Legacy-Planung permissiv öffnen.
+             Safety und ein gelatchtes holdcharge bleiben sofort wirksam. #}
+          {% set fallback_active =
+               is_state('binary_sensor.se_nf_evopt_fallback_active', 'on') %}
+
+          {% set fallback_age_s = (
+               now().timestamp()
+               - as_timestamp(
+                   states.binary_sensor.se_nf_evopt_fallback_active.last_changed,
+                   now().timestamp()
+                 )
+             ) | int(0) if fallback_active else 0 %}
+
+          {% set fallback_grace_s = 1200 %}
+
+          {% set fallback_permissive_ready =
+               fallback_active and fallback_age_s >= fallback_grace_s %}
+
+          {% set actual_w =
+               states('sensor.se_nf_charge_limit_actual') | float(closed_w) %}
+
+          {% set midpoint_w = (open_w + closed_w) / 2 %}
+
+          {% set held_w =
+               open_w if actual_w >= midpoint_w else closed_w %}
+
+          {% if source == 'safety' %}
+            {{ fallback | round(0) }}
+          {% elif selected == 'EVOpt optimiert' and charge_block %}
+            {{ closed_w | round(0) }}
+          {% elif source == 'evopt' and action_raw == 'holdcharge' %}
             {{ closed_w | round(0) }}
           {% elif source == 'evopt' %}
             {{ open_w | round(0) }}
+          {% elif selected == 'EVOpt optimiert'
+                and source == 'legacy'
+                and not fallback_permissive_ready %}
+            {{ held_w | round(0) }}
           {% else %}
             {{ fallback | round(0) }}
           {% endif %}
@@ -603,6 +641,40 @@ template:
           charge_control: binary_0_or_5000
           transition_policy: restrictive_immediate_permissive_delayed
           fallback: Netzdienlich laden
+          fallback_active: "{{ states('binary_sensor.se_nf_evopt_fallback_active') }}"
+          fallback_age_s: >-
+            {% if is_state('binary_sensor.se_nf_evopt_fallback_active', 'on') %}
+              {{ (now().timestamp()
+                  - as_timestamp(
+                      states.binary_sensor.se_nf_evopt_fallback_active.last_changed,
+                      now().timestamp()
+                    )
+                 ) | int(0) }}
+            {% else %}
+              0
+            {% endif %}
+          fallback_grace_s: 1200
+          fallback_permissive_ready: >-
+            {% set active =
+                 is_state('binary_sensor.se_nf_evopt_fallback_active', 'on') %}
+            {% set age = (
+                 now().timestamp()
+                 - as_timestamp(
+                     states.binary_sensor.se_nf_evopt_fallback_active.last_changed,
+                     now().timestamp()
+                   )
+               ) | int(0) if active else 0 %}
+            {{ active and age >= 1200 }}
+          held_actual_w: >-
+            {% set open_w =
+                 states('input_number.se_nf_open_charge_limit_w') | float(5000) %}
+            {% set closed_w =
+                 states('input_number.se_nf_closed_charge_limit_w') | float(0) %}
+            {% set actual_w =
+                 states('sensor.se_nf_charge_limit_actual') | float(closed_w) %}
+            {{ open_w
+               if actual_w >= ((open_w + closed_w) / 2)
+               else closed_w }}
       - name: SE NF EVOpt Shadow Effective Target W
         unique_id: se_nf_evopt_shadow_effective_target_w
         unit_of_measurement: W

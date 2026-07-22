@@ -11,20 +11,19 @@ automation:
         event: start
       - platform: time_pattern
         minutes: "/5"
+      # Erneute Prüfung nach der sicheren Öffnungsstabilisierung.
+      # 0 W wird über den vorhandenen Sofort-Trigger weiterhin direkt gesetzt.
+      - platform: state
+        entity_id: sensor.se_nf_desired_target
+        for: "00:01:30"
+      # Nur der bereits arbitrierte Endwert triggert den Writer.
+      # Upstream-/Diagnosesensoren dürfen keine Zwischenzustände direkt auslösen.
       - platform: state
         entity_id:
           - sensor.se_nf_desired_target
-          - input_select.se_nf_session_state
-          - input_select.se_nf_optimization_mode
           - input_boolean.se_netzdienlich_enabled
-          - sensor.se_nf_config_check
-          - sensor.se_nf_sanity_check
-          - sensor.se_nf_charge_limit_actual
-          - binary_sensor.se_nf_evopt_active_control
-          - sensor.se_nf_evopt_action_raw
-          - binary_sensor.se_nf_evopt_charge_block_request
-          - sensor.se_nf_evopt_action_stable
-          - sensor.se_nf_active_control_label
+          - binary_sensor.se_nf_controller_write_enabled
+          - input_text.se_nf_charge_limit_entity
     action:
       - delay: >-
           {% if trigger.platform == 'homeassistant' %}00:02:30{% else %}00:00:00{% endif %}
@@ -66,17 +65,28 @@ automation:
             > 0 and now_i >= start_ts) }}
           target_open_is_risk: >-
             {{ is_state('input_select.se_nf_session_state','risk') }}
-          target_open_stable_s: >-
+          session_state_stable_s: >-
             {{ (now().timestamp() | int(0)) -
                (as_timestamp(states.input_select.se_nf_session_state.last_changed, 0) | int(0)) }}
+          target_value_stable_s: >-
+            {{ (now().timestamp() | int(0)) -
+               (as_timestamp(states.sensor.se_nf_desired_target.last_changed, 0) | int(0)) }}
+          emergency_open: >-
+            {{ not is_state('input_boolean.se_netzdienlich_enabled','on')
+               or not is_state('sensor.se_nf_config_check','ok')
+               or not is_state('sensor.se_nf_sanity_check','ok') }}
+          permissive_open_stable: >-
+            {{ emergency_open or target_value_stable_s | int(0) >= 90 }}
           target_open_allowed: >-
             {{ target_open_plausible
                and (
                  not target_open_is_risk
-                 or target_open_stable_s | int(0) >= 90
+                 or session_state_stable_s | int(0) >= 90
                ) }}
           priority_open_write: >-
-            {{ target_w | float(0) >= 4750 and target_open_allowed }}
+            {{ target_w | float(0) >= 4750
+               and target_open_allowed
+               and permissive_open_stable }}
           safety_close_write: >-
             {{ target_w | float(0) <= 50 and current_w | float(0) > 50 }}
           normal_write_window_ok: "{{ cooldown_ok and not lock_active }}"
@@ -90,7 +100,13 @@ automation:
                and (
                     safety_close_write
                     or priority_open_write
-                    or (normal_write_window_ok and (target_w | float(0) < 4750 or target_open_allowed))
+                    or (
+                      normal_write_window_ok
+                      and (
+                        target_w | float(0) < 4750
+                        or (target_open_allowed and permissive_open_stable)
+                      )
+                    )
                ) }}
       - if:
           - condition: template
@@ -104,10 +120,47 @@ automation:
                 target={{ target_w }}W, current={{ current_w }}W, delta={{ delta_w }}W,
                 configured_entity={{ configured_entity }}, fixed_entity={{ entity }},
                 priority_open={{ priority_open_write }},
+                target_stable_s={{ target_value_stable_s }},
+                emergency_open={{ emergency_open }},
                 cooldown_ok={{ cooldown_ok }}, lock_active={{ lock_active }},
                 allowed={{ write_allowed }}, reason={{ states('sensor.se_nf_decision_reason') }}
       - condition: template
         value_template: "{{ write_allowed }}"
+      # Audit-Intent: Der Watchdog bekommt vor dem echten Modbus-Aufruf
+      # den vollständigen Entscheidungs- und Triggerkontext.
+      - event: se_charge_limit_write_intent
+        event_data:
+          writer: automation.solaredge_netzdienlich_v2_8_single_writer
+          target_entity: "{{ entity }}"
+          requested_value: "{{ target_w | float(5000) | round(0) }}"
+          trigger_platform: >-
+            {{ trigger.platform if trigger is defined and trigger.platform is defined else 'unknown' }}
+          trigger_entity_id: >-
+            {{ trigger.entity_id if trigger is defined and trigger.entity_id is defined else '' }}
+          trigger_from: >-
+            {{ trigger.from_state.state if trigger is defined and trigger.from_state is defined and trigger.from_state is not none else '' }}
+          trigger_to: >-
+            {{ trigger.to_state.state if trigger is defined and trigger.to_state is defined and trigger.to_state is not none else '' }}
+          session_state: "{{ states('input_select.se_nf_session_state') }}"
+          optimization_mode: "{{ states('sensor.se_nf_optimization_mode_effective') }}"
+          evopt_action_raw: "{{ states('sensor.se_nf_evopt_action_raw') }}"
+          evopt_action_stable: "{{ states('sensor.se_nf_evopt_action_stable') }}"
+          evopt_charge_block: "{{ states('binary_sensor.se_nf_evopt_charge_block_request') }}"
+          evopt_active_control: "{{ states('binary_sensor.se_nf_evopt_active_control') }}"
+          evopt_candidate_source: "{{ states('sensor.se_nf_evopt_candidate_source') }}"
+          evopt_candidate_target: "{{ states('sensor.se_nf_evopt_candidate_target_w') }}"
+          desired_target: "{{ states('sensor.se_nf_desired_target') }}"
+          current_value: "{{ current_w }}"
+          delta_w: "{{ delta_w }}"
+          writer_mode: "{{ states('sensor.se_nf_writer_mode') }}"
+          decision_reason: "{{ states('sensor.se_nf_decision_reason') }}"
+          config_check: "{{ states('sensor.se_nf_config_check') }}"
+          sanity_check: "{{ states('sensor.se_nf_sanity_check') }}"
+          priority_open: "{{ priority_open_write }}"
+          safety_close: "{{ safety_close_write }}"
+          cooldown_ok: "{{ cooldown_ok }}"
+          lock_active: "{{ lock_active }}"
+          target_stable_s: "{{ target_value_stable_s }}"
       - service: number.set_value
         data:
           entity_id: >-
