@@ -21,11 +21,25 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - name: Build the Codespaces-compatible dev container and run its test entrypoint
-        uses: devcontainers/ci@v0.3
-        with:
-          push: never
-          runCmd: bash scripts/run_deep_tests.sh all
+      - name: Install the reference Dev Container CLI
+        run: npm install --global @devcontainers/cli@0.82.0
+      - name: Build and start the Codespaces-compatible dev container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/codespaces
+          devcontainer up --workspace-folder . --log-level info \
+            2>&1 | tee artifacts/codespaces/up.log
+      - name: Run Codespaces setup and tests inside the dev container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          devcontainer exec --workspace-folder . \
+            bash .devcontainer/post-create.sh \
+            2>&1 | tee artifacts/codespaces/post-create.log
+          devcontainer exec --workspace-folder . \
+            bash scripts/run_deep_tests.sh all \
+            2>&1 | tee artifacts/codespaces/test.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:
