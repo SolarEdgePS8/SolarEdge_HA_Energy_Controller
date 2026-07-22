@@ -21,6 +21,7 @@ run_static() {
     shellcheck -x -f gcc \
       scripts/run_deep_tests.sh \
       scripts/run_ha_smoke.sh \
+      scripts/run_ha_24h_replay.sh \
       .devcontainer/post-create.sh \
       | tee "$ARTIFACTS/shellcheck.txt"
   fi
@@ -32,11 +33,15 @@ run_static() {
 run_model() {
   python -m testbench.run_scenarios \
     --output "$ARTIFACTS/scenario_report.json"
+  python -m testbench.day_replay \
+    --fixture testbench/fixtures/real_day_2026-07-21_15m.json \
+    --output-dir "$ARTIFACTS/real-day-24h-model"
   python -m pytest -q \
     tests/deep/test_scenario_matrix.py \
     tests/deep/test_cross_mode_matrix.py \
     tests/deep/test_properties.py \
     tests/deep/test_state_machine.py \
+    tests/deep/test_real_day_24h.py \
     --junitxml="$ARTIFACTS/model-junit.xml" \
     --cov=testbench.reference \
     --cov-report=term-missing \
