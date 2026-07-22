@@ -6,6 +6,7 @@ GROUP="${1:-all}"
 ARTIFACTS="${SE_TEST_ARTIFACTS:-$ROOT/artifacts}"
 mkdir -p "$ARTIFACTS"
 cd "$ROOT"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 run_static() {
   python audit/readonly_audit.py . --release-gate \
@@ -22,15 +23,15 @@ run_static() {
       scripts/run_ha_smoke.sh \
       .devcontainer/post-create.sh
   fi
-  pytest -q tests/deep/test_architecture_contracts.py \
+  python -m pytest -q tests/deep/test_architecture_contracts.py \
     --junitxml="$ARTIFACTS/static-junit.xml" \
     -p no:cacheprovider
 }
 
 run_model() {
-  python testbench/run_scenarios.py \
+  python -m testbench.run_scenarios \
     --output "$ARTIFACTS/scenario_report.json"
-  pytest -q \
+  python -m pytest -q \
     tests/deep/test_scenario_matrix.py \
     tests/deep/test_properties.py \
     tests/deep/test_state_machine.py \
@@ -44,7 +45,7 @@ run_model() {
 }
 
 run_fake_evcc() {
-  pytest -q tests/deep/test_fake_evcc.py \
+  python -m pytest -q tests/deep/test_fake_evcc.py \
     --junitxml="$ARTIFACTS/fake-evcc-junit.xml" \
     -p no:cacheprovider
 }
