@@ -1,100 +1,86 @@
-# Technischer Status v0.1.0-rc.3
+# Technischer Status v0.1.0-rc.4
 
 ## Umfang
 
-Der Release Candidate enthält:
+RC4 enthält:
 
 - 18 Home-Assistant-Package-YAMLs;
-- fünf Runtime-/Audit-Dateien, die nach `/config` installiert werden;
-- Installer, Update, Migration und vollständigen dateibezogenen Rollback;
+- fünf Runtime-/Audit-Dateien;
+- Write-Watchdog `1.0.2` mit drei Custom-Component-Dateien;
+- zwei Terminal-Tools für Bericht und Live-Trace;
+- Installer, Update, Migration und dateibezogenen Rollback;
 - Site-Config-Mapping;
-- statische Audits, Runtime-Checker und Writer-Konfliktprüfung;
-- einen read-only EVOpt-Slot-Index-Livetest;
-- vollständige Erstinstallations- und Update-Dokumentation;
-- Release-ZIP, äußere SHA256-Datei, internes Manifest und interne `SHA256SUMS`.
+- statische Audits, Vertragstests und Writer-Konfliktprüfung;
+- Release-ZIP, äußere SHA256-Datei, internes Manifest und interne `SHA256SUMS`;
+- Live-Paritätsmanifest für alle 18 Package-YAMLs.
 
-## Automatisch bestätigt
+## Bestätigte Ursache
 
-GitHub Actions bestätigt für den RC3-Branch:
-
-- Read-only Release Gate;
-- alle 18 Package-YAMLs gültig;
-- keine verbotenen Altprojekt- oder privaten Anlagendateien;
-- keine doppelten Helper, Automations-IDs oder `unique_id`-Werte;
-- Python- und Shell-Syntax;
-- Modus-, Safety-, Arbiter- und Writer-Verträge;
-- acht EVOpt-Slotwechsel- und Übergangstests;
-- Release-Build `0.1.0-rc.3`;
-- äußere ZIP-Prüfsumme;
-- ZIP-Integrität;
-- internes Release-Manifest;
-- vorhandene Version und vorhandenen Quellcommit;
-- Upload genau des geprüften Release-Bundles als Workflow-Artefakt.
-
-## Release-Installer bestätigt
-
-Der aus GitHub Actions heruntergeladene Release-Build wurde zusätzlich isoliert geprüft:
+Auf der Referenzinstallation wurde ein echter Zyklus beobachtet:
 
 ```text
-RELEASE_SHA256=PASS
-ZIP_INTEGRITY=PASS
-RELEASE_MANIFEST=PASS
-PACKAGE_YAMLS_18_OF_18=PASS
-RUNTIME_FILES_5_OF_5=PASS
-INSTALL_SIMULATION=PASS
-INSTALLED_HASHES_23_OF_23=PASS
-MANUAL_ROLLBACK=PASS
-AUTOMATIC_FAILURE_ROLLBACK=PASS
+0 W → 5000 W → 0 W
 ```
 
-Der Installer erzeugt ein Runtime-Manifest mit:
+Beide Befehle kamen vom einzigen zentralen Charge-Limit-Writer. Während EVOpt startete, übernahm der Legacy-Fallback zu früh. Nach EVOpt-Übernahme mit `holdcharge` wurde wieder geschlossen. Es gab keinen konkurrierenden Writer.
+
+## RC4-Lösung
+
+- restriktiv sofort, permissiv verzögert;
+- `holdcharge`-Latch 180 Sekunden;
+- Öffnung nach 90 Sekunden stabilem finalem Sollwert;
+- aktueller SolarEdge-Zustand wird während kurzer EVOpt-Ausfälle gehalten;
+- permissiver Legacy-Fallback erst nach 20 Minuten;
+- persistente Restart-Helper;
+- Watchdog mit Context- und Intent-Korrelation;
+- Fehlalarmvermeidung für rohe `holdcharge`-Daten während Warm-up/Fallback.
+
+## Referenzinstallation
 
 ```text
-version = 0.1.0-rc.3
-source_commit = GitHub-Commit des Release-Builds
-installed_files = 23
-```
-
-## Referenzinstallation bestätigt
-
-Auf der Referenzinstallation wurden bestätigt:
-
-```text
-HA_CORE_CHECK=PASS
-SITE_CONFIG=PASS
-CONFIG_CHECK=PASS
-SANITY_CHECK=PASS
-RUNTIME_MANIFEST=PASS
-INSTALLED_FILES_23_OF_23=PASS
-ACTIVE_MODE=EVOpt optimiert
+STATIC_CHECKS=19_OK_0_ERRORS
 EVOPT_STATUS=healthy
+EVOPT_ACTION_RAW=holdcharge
+EVOPT_ACTION_STABLE=holdcharge
 EVOPT_ACTIVE_CONTROL=on
+EVOPT_CHARGE_BLOCK=on
+EVOPT_FALLBACK=off
+CANDIDATE_SOURCE=evopt
+DESIRED_TARGET=0
+SOLAREDGE_CHARGE_LIMIT=0
+WATCHDOG_STATUS=ok
 ```
 
-Die 18 auf der Referenzinstallation verwendeten `se_controller_*.yaml`-Dateien sind byteidentisch mit den 18 Package-Dateien des geprüften RC3-Release-Builds.
+Seit dem Neustart nach Installation des Startup-Handover-Fixes:
 
-## RC3-spezifischer Live-Nachweis
-
-Vor dem Merge auf `main` muss der read-only EVOpt-Live-Test vollständig enden mit:
-
-```json
-{
-  "slot_advances": 2,
-  "fallback_samples_after_grace": 0,
-  "api_errors": 0,
-  "errors": 0,
-  "pass": true
-}
+```text
+write_intent=0
+number_set_value_call=0
+charge_limit_state_change=0
+evopt_mismatch=0
 ```
 
-`slot_advances` zählt nur echte Erhöhungen des `slot_index` innerhalb desselben Optimizer-Plans. Eine Solver-Neuberechnung mit zurückgesetztem Index zählt nicht als regulärer Slotwechsel.
+## Live-/Git-Parität
 
-Der Test muss mindestens zwei echte Slot-Index-Fortschaltungen erfassen. Währenddessen müssen `sensor.se_nf_evopt_status = healthy` und `binary_sensor.se_nf_evopt_active_control = on` bleiben.
+`validation/live_package_sha256_rc4.json` enthält SHA256 und Größe aller 18 öffentlichen Package-Dateien des geprüften Live-Exports vom 22.07.2026. Das Release-Gate und ein Pytest vergleichen jede Git-Datei damit. Abweichungen blockieren das Release.
+
+## Installer
+
+Das Runtime-Manifest enthält 28 projektverwaltete Dateien:
+
+```text
+18 Package-YAMLs
+5 Runtime-/Audit-Dateien
+3 Watchdog-Dateien
+2 Watchdog-Tools
+```
+
+`configuration.yaml` wird gesichert und bei Bedarf um den Watchdog-Block ergänzt, gehört wegen lokaler Inhalte aber nicht zu den 28 Hash-Dateien.
 
 ## Veröffentlichung
 
-Nach bestandenem Live-Test wird PR #3 per Squash nach `main` übernommen. Der erfolgreiche `main`-Workflow erstellt danach automatisch das GitHub-Prerelease `v0.1.0-rc.3` und hängt exakt das im Workflow geprüfte ZIP sowie dessen `.sha256`-Datei an.
+GitHub Actions führt Release-Gate, Python-/Shell-Syntax, Pytest, Installer-/Rollbacksimulation, ZIP-Prüfung und Manifestprüfung aus. Erst der erfolgreiche Workflow auf `main` veröffentlicht automatisch das Prerelease `v0.1.0-rc.4` mit genau dem getesteten ZIP und dessen Prüfsumme.
 
 ## Einstufung
 
-Technisch geeignet für ein öffentliches **Prerelease `v0.1.0-rc.3`**, sobald der abschließende EVOpt-Live-Bericht `pass=true` meldet. Noch nicht als stabiler `v1.0`-Stand einzustufen, weil weitere Installationen, SolarEdge-Varianten und Integrationsversionen zusätzliche Praxiserfahrung benötigen.
+Technisch geeignet für ein öffentliches Prerelease `v0.1.0-rc.4`. Noch kein stabiler `v1.0`-Stand, da weitere SolarEdge-Modelle, Integrationsversionen und Fremdinstallationen zusätzliche Praxiserfahrung benötigen.
