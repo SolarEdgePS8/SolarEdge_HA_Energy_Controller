@@ -12,7 +12,7 @@ run_static() {
   python audit/readonly_audit.py . --release-gate \
     | tee "$ARTIFACTS/readonly_audit.txt"
   python -m compileall -q audit scripts tests testbench custom_components
-  python -m ruff check testbench tests/deep \
+  python -m ruff check testbench tests/deep scripts/export_fixture.py scripts/privacy_scan.py \
     --output-format=github \
     | tee "$ARTIFACTS/ruff.txt"
   find scripts audit tools -type f -name '*.sh' -print0 \
@@ -22,10 +22,16 @@ run_static() {
       scripts/run_deep_tests.sh \
       scripts/run_ha_smoke.sh \
       scripts/run_ha_24h_replay.sh \
+      scripts/collect_failure_bundle.sh \
       .devcontainer/post-create.sh \
       | tee "$ARTIFACTS/shellcheck.txt"
   fi
-  python -m pytest -q tests/deep/test_architecture_contracts.py \
+  python scripts/privacy_scan.py --self-test \
+    testbench/fixtures \
+    --report "$ARTIFACTS/privacy-report.json"
+  python -m pytest -q \
+    tests/deep/test_architecture_contracts.py \
+    tests/deep/test_fixture_contracts.py \
     --junitxml="$ARTIFACTS/static-junit.xml" \
     -p no:cacheprovider
 }
@@ -36,12 +42,16 @@ run_model() {
   python -m testbench.day_replay \
     --fixture testbench/fixtures/real_day_2026-07-21_15m.json \
     --output-dir "$ARTIFACTS/real-day-24h-model"
+  python -m testbench.day_replay \
+    --fixture testbench/fixtures/daily_balance_calibrated_example_15m.json \
+    --output-dir "$ARTIFACTS/calibrated-day-24h-model"
   python -m pytest -q \
     tests/deep/test_scenario_matrix.py \
     tests/deep/test_cross_mode_matrix.py \
     tests/deep/test_properties.py \
     tests/deep/test_state_machine.py \
     tests/deep/test_real_day_24h.py \
+    tests/deep/test_fixture_contracts.py \
     --junitxml="$ARTIFACTS/model-junit.xml" \
     --cov=testbench.reference \
     --cov-report=term-missing \
