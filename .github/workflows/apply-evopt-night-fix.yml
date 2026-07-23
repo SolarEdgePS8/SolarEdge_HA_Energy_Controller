@@ -1,0 +1,131 @@
+name: Apply EVOpt night-flapping source patch
+
+on:
+  push:
+    branches:
+      - fix/evopt-night-flapping
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/evopt-night-flapping
+          fetch-depth: 0
+      - name: Apply restrictive EVOpt consensus patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/runtime/se_nf_evopt_shadow_adapter.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('TOOL_VERSION = "1.2.0"', 'TOOL_VERSION = "1.2.1"')
+
+          start = text.index('def select_action(')
+          end = text.index('\ndef evaluate_freshness(', start)
+          replacement = '''def select_action(
+              suggestion: dict[str, Any],
+              current_index: int | None,
+              charge_w: float,
+              discharge_w: float,
+              import_w: float,
+              export_w: float,
+          ) -> dict[str, Any]:
+              """Select a trustworthy action for the current slot.
+
+              A charge block is safety-restrictive. If either the explicit evcc
+              suggestion or the validated current optimizer slot requests
+              ``holdcharge``, the effective action stays ``holdcharge``. This
+              prevents a fresh first-slot ``normal`` suggestion from reopening
+              the SolarEdge charge limit while the current slot still plans
+              battery discharge or grid export.
+
+              Other actions retain the existing first-slot/slot-authority policy.
+              """
+              explicit = str(suggestion.get("action") or "").strip().lower()
+              explicit_valid = explicit in VALID_ACTIONS
+              slot_action, slot_reason = derive_action_from_slot(
+                  charge_w, discharge_w, import_w, export_w
+              )
+              slot_valid = slot_action in VALID_ACTIONS
+              explicit_consistent = explicit_valid and action_matches_slot(
+                  explicit, charge_w, discharge_w, import_w, export_w
+              )
+
+              if current_index is None:
+                  return {
+                      "action": explicit if explicit_valid else "unknown",
+                      "source": "suggestion_without_current_slot" if explicit_valid else "none",
+                      "suggestion_action": explicit or "unavailable",
+                      "suggestion_plan_consistent": False,
+                      "slot_action": slot_action,
+                      "slot_action_reason": slot_reason,
+                      "suggestion_overridden": False,
+                  }
+
+              # Restrictive consensus for the charge limit: either source can
+              # block charging, but charging is released only after both sources
+              # are permissive. This is deliberately asymmetric.
+              if slot_valid and slot_action == "holdcharge" and explicit != "holdcharge":
+                  action = "holdcharge"
+                  source = "slot_restrictive_override_suggestion"
+                  overridden = explicit_valid
+              elif explicit == "holdcharge" and slot_action != "holdcharge":
+                  action = "holdcharge"
+                  source = "suggestion_restrictive_override_slot"
+                  overridden = False
+              elif current_index == 0 and explicit_valid and explicit_consistent:
+                  action = explicit
+                  source = "suggestion"
+                  overridden = False
+              elif slot_valid:
+                  action = slot_action
+                  if explicit_valid and explicit != slot_action:
+                      source = "slot_override_suggestion_mismatch"
+                      overridden = True
+                  elif explicit_valid:
+                      source = "slot_current"
+                      overridden = False
+                  else:
+                      source = slot_reason
+                      overridden = False
+              else:
+                  action = "unknown"
+                  source = slot_reason
+                  overridden = False
+
+              return {
+                  "action": action,
+                  "source": source,
+                  "suggestion_action": explicit or "unavailable",
+                  "suggestion_plan_consistent": explicit_consistent,
+                  "slot_action": slot_action,
+                  "slot_action_reason": slot_reason,
+                  "suggestion_overridden": overridden,
+              }
+
+          '''
+          text = text[:start] + replacement + text[end + 1:]
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python -m py_compile scripts/runtime/se_nf_evopt_shadow_adapter.py
+          python -m pytest -q tests/deep/test_evopt_restrictive_consensus.py
+
+          if git diff --quiet; then
+            echo 'Patch already applied; nothing to commit.'
+            exit 0
+          fi
+
+          git config user.name 'SolarEdgePS8'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/runtime/se_nf_evopt_shadow_adapter.py
+          git commit -m 'Fix: restriktiven EVOpt-Konsens gegen Nachtflattern anwenden'
+          git push origin HEAD:fix/evopt-night-flapping
