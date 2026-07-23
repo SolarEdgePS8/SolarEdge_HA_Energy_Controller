@@ -94,9 +94,24 @@ STAGES = {
 def render(stage: Stage, status: str) -> str:
     normalized = status.strip().lower()
     passed = normalized == "success"
-    icon = "✅" if passed else "❌"
-    result = "BESTANDEN" if passed else "NICHT BESTANDEN"
-    meaning = stage.green if passed else stage.red
+    warning = normalized in {"warning", "preview-failed", "nonblocking-failure"}
+
+    if passed:
+        icon = "✅"
+        result = "BESTANDEN"
+        meaning = stage.green
+        action = "Keine Aktion nötig; die nächste Teststufe entscheidet weiter."
+    elif warning:
+        icon = "⚠️"
+        result = "WARNUNG – PRÜFEN"
+        meaning = stage.red
+        action = stage.next_step
+    else:
+        icon = "❌"
+        result = "NICHT BESTANDEN"
+        meaning = stage.red
+        action = stage.next_step
+
     return "\n".join(
         [
             f"## {icon} {stage.title}: {result}",
@@ -108,9 +123,7 @@ def render(stage: Stage, status: str) -> str:
             meaning,
             "",
             "**Was ist jetzt zu tun?**  ",
-            "Keine Aktion nötig; die nächste Teststufe entscheidet weiter."
-            if passed
-            else stage.next_step,
+            action,
             "",
             "> Wichtig: Ein vollständig grüner GitHub-Test ersetzt nicht den kontrollierten Live-Test auf der realen SolarEdge-Anlage.",
             "",
