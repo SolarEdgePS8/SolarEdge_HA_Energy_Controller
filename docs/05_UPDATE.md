@@ -102,16 +102,42 @@ FEHLER=0 WARNUNGEN=0 PASS=True
 
 ## 7. Was sich bei EVOpt ändert
 
-RC4 verwendet folgende Übergangsregeln:
+Der Stand ab Commit `205c5e8` schützt die reale SolarEdge-Schreibstelle zusätzlich gegen kurze oder widersprüchliche Freigaben.
 
-- `holdcharge` sperrt sofort;
-- der Sperr-Latch bleibt 180 Sekunden aktiv;
-- eine Öffnung auf `5000 W` benötigt 90 Sekunden stabilen finalen Sollwert;
-- während EVOpt nach einem Neustart aufwärmt, wird der zuletzt bestätigte SolarEdge-Zustand gehalten;
-- erst nach 20 Minuten durchgehendem EVOpt-Ausfall übernimmt der vollständige Legacy-Fallback permissiv;
-- Safety-Fehler behalten Vorrang.
+### Restriktiv: sofort
 
-Dadurch wird der bisher mögliche Startup-Zyklus `0 → 5000 → 0` vermieden.
+Bei aktivem Modus `EVOpt optimiert` verhindert jedes dieser Signale einen permissiven `5000-W`-Write:
+
+```text
+sensor.se_nf_evopt_action_raw = holdcharge
+sensor.se_nf_evopt_action_stable = holdcharge
+binary_sensor.se_nf_evopt_charge_block_request = on
+```
+
+Das gilt ausdrücklich auch dann, wenn Config, Sanity oder ein anderer Safety-Pfad gleichzeitig Fail-open anfordert. Ein restriktiver Wechsel auf `0 W` bleibt dagegen sofort zulässig.
+
+### Permissiv: zweifach stabilisiert
+
+Eine EVOpt-Freigabe auf `5000 W` benötigt:
+
+1. mindestens **20 Minuten** durchgehend nicht-restriktive EVOpt-Rohaktion;
+2. zusätzlich mindestens **90 Sekunden** stabilen finalen Sollwert.
+
+Der vorgelagerte Charge-Block besitzt weiterhin eine kurze Entprellung. Er allein entscheidet aber nicht mehr über die SolarEdge-Freigabe. Unmittelbar vor dem einzigen `number.set_value`-Aufruf prüft der Writer alle drei restriktiven EVOpt-Signale erneut.
+
+### Startup und Fallback
+
+- Während EVOpt nach einem Neustart aufwärmt, wird der zuletzt bestätigte SolarEdge-Zustand gehalten.
+- Ein vollständiger Legacy-Fallback wird erst nach 20 Minuten durchgehendem EVOpt-Ausfall permissiv.
+- Auch der Fallback darf eine noch eindeutige `holdcharge`-Sperre nicht umgehen.
+- Ohne aktives restriktives EVOpt-Signal bleibt ein echter Emergency-Fail-open möglich.
+
+Damit wird der live beobachtete Fehlerfall verhindert:
+
+```text
+Wert=5000 raw=holdcharge stable=holdcharge block=on
+Wert=0    raw=holdcharge stable=holdcharge block=on
+```
 
 ## 8. Master wieder einschalten
 
@@ -144,7 +170,28 @@ evopt_mismatch
 duplicate: true
 ```
 
-Ein einzelner Wechsel `0 ↔ 5000` ist normal, wenn sich die stabile EVOpt-Aktion tatsächlich ändert.
+Zusätzlich immer kritisch:
+
+```text
+requested_value = 5000
+raw = holdcharge
+```
+
+oder
+
+```text
+requested_value = 5000
+stable = holdcharge
+```
+
+oder
+
+```text
+requested_value = 5000
+block = on
+```
+
+Ein einzelner Wechsel `0 ↔ 5000` ist nur dann normal, wenn sich die stabile EVOpt-Aktion tatsächlich und ausreichend lange geändert hat.
 
 ## 10. Installierte Version prüfen
 

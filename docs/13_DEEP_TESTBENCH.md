@@ -2,146 +2,153 @@
 
 ## Ziel
 
-Der Deep Testbench prüft den SolarEdge HA Energy Controller außerhalb einer realen Anlage. Er bildet die Betriebslogik der Referenzinstallation mit neutralen Testdaten nach und ergänzt die bestehenden Release-, Installer- und Paritätstests.
+Der Deep Testbench prüft den SolarEdge HA Energy Controller außerhalb einer realen Anlage. Er verwendet neutrale Testdaten, echte Projektdateien und Home-Assistant-Container. Eine Verbindung zur produktiven SolarEdge- oder Home-Assistant-Instanz wird niemals hergestellt.
 
-Die Testumgebung verbindet sechs Ebenen:
+Die Testumgebung soll zwei Fragen beantworten:
 
-1. statische Architektur-, Syntax- und Datenschutzprüfungen;
-2. ein unabhängiges Python-Referenzmodell;
-3. feste Tag-/Nacht-/PV-/SoC-/Forecast-Szenarien;
-4. Property-, Grenzwert- und Fake-Time-Zustandsmaschinentests;
-5. einen umschaltbaren Fake-evcc-Server;
-6. einen Home-Assistant-Container-Test sowie das tatsächliche Release-ZIP.
+1. Ist der Code technisch und logisch konsistent?
+2. Kann ein Fehlerfall zu einem falschen SolarEdge-Schreibzugriff führen?
 
-Es wird niemals eine Verbindung zur produktiven SolarEdge- oder Home-Assistant-Instanz hergestellt.
+Sie kann nicht beweisen, dass jede reale Wechselrichter-, Batterie- oder Modbus-Firmware identisch reagiert. Deshalb bleibt nach allen grünen GitHub-Tests eine kontrollierte Live-Abnahme erforderlich.
 
-## Warum Codespaces?
+## Die Testebenen
 
-Die Datei `.devcontainer/devcontainer.json` legt Python, Docker, ShellCheck, YAML-Unterstützung und VS-Code-Erweiterungen fest. Dadurch verwenden Codespaces und lokale Dev-Container dieselbe Werkzeugbasis. GitHub Actions führt dieselben Einstiegsskripte aus.
+Die Testumgebung verbindet:
 
-## Codespace öffnen
+1. YAML-, Python- und Shell-Syntax;
+2. Architektur-, Datenschutz- und Single-Writer-Verträge;
+3. ein unabhängiges Python-Referenzmodell;
+4. feste Szenarien, Grenzwerte und Property-Tests;
+5. direkte Auswertung produktiver Jinja-Ausdrücke;
+6. einen kontrollierbaren Fake-evcc-Server;
+7. Home-Assistant-Smoke-Tests;
+8. ein 96-Stunden-Replay aller vier Modi;
+9. Release-, Installer- und Rollbackprüfung;
+10. Codespaces/Dev-Container als reproduzierbare Komplettumgebung.
 
-1. Repository oder den Test-Branch öffnen.
-2. **Code → Codespaces → Create codespace** wählen.
-3. Warten, bis `postCreateCommand` abgeschlossen ist.
-4. Im Terminal ausführen:
+## Was der Nutzer bei jedem Test sieht
 
-```bash
-bash scripts/run_deep_tests.sh all
-```
+Jede GitHub-Teststufe schreibt am Ende einen Abschnitt in normaler Sprache:
 
-Für den vollständigen Home-Assistant-Container-Test:
+- **Was wird geprüft?**
+- **Was bedeutet Grün?**
+- **Was bedeutet Rot oder eine Warnung?**
+- **Was muss als Nächstes getan werden?**
 
-```bash
-bash scripts/run_ha_smoke.sh
-```
+Technische Logs und JSON-Dateien bleiben erhalten, sind aber nicht mehr der erste Einstiegspunkt.
 
-Für die interaktive Fake-evcc-/Home-Assistant-Umgebung:
-
-```bash
-docker compose -f docker/docker-compose.test.yml up --build
-```
-
-Ports:
+Die aktuelle Stable-Vorschau ist bewusst nicht blockierend. Schlägt ihr interner Smoke- oder Replay-Test fehl, wird sie trotzdem nicht fälschlich als grün erklärt, sondern als:
 
 ```text
-7070  Fake evcc
-8123  Home Assistant Testbench
+⚠️ WARNUNG – PRÜFEN
 ```
 
-## Testdaten
+## Teststufen in GitHub Actions
 
-Die Datei `tests/fixtures/controller_scenarios.yaml` enthält 29 feste, künstliche Szenarien für:
+| Job | Einfache Bedeutung | Blockiert den Merge? |
+|---|---|---|
+| `codespaces-devcontainer` | Die komplette Testumgebung lässt sich reproduzierbar aufbauen | ja |
+| `static-architecture` | Dateien, Datenschutz und Single-Writer-Architektur sind konsistent | ja |
+| `model-matrix-property-state` | Steuerungslogik und Grenzfälle erfüllen die unabhängigen Sicherheitsregeln | ja |
+| `fake-evcc-api` | Normale und fehlerhafte evcc-Antworten werden richtig behandelt | ja |
+| `home-assistant-2026.6.3-smoke` | Das Package lädt und startet in HA 2026.6.3 | ja |
+| `home-assistant-2026.7.3-smoke` | Das Package lädt und startet in HA 2026.7.3 | ja |
+| `stable-preview-nonblocking` | Vorschau gegen das aktuell veröffentlichte Stable-Image | nein, aber Warnung sichtbar |
+| `main-production-real-day-24h` | Vier Modi mit je 24 Stunden und produktiver Automation | ja |
+| `release-installer-rollback` | ZIP, Prüfsumme, Installation und Rollback sind konsistent | ja |
+| `deep-release-gate` | Alle verpflichtenden Stufen sind erfolgreich | ja |
 
-- Eigenverbrauch maximieren;
-- Netzdienlich laden;
-- Akku schonen;
-- EVOpt optimiert;
-- Master aus, Site nicht bestätigt, Config-/Sanity-Fehler und Risk Flag;
-- Tag, Nacht, Ladefenster, niedrigen SoC und erreichtes Ziel;
-- EVOpt `normal`, `holdcharge`, `hold`, `charge`, `discharge`;
-- EVOpt-Startup-Hold und vollständigen Legacy-Fallback;
-- Writer-Stabilität, Cooldown und identische Sollwerte.
+## Wichtige Korrektur: Produktive PR-Änderungen werden wirklich getestet
 
-Alle Werte sind synthetisch. Die verwendete neutrale Referenzkapazität von `24.25 kWh` dient nur dazu, das Verhalten der geprüften Referenzinstallation nachzubilden; sie ist kein allgemeiner Standardwert.
+Früher verlangte der 96-Stunden-Job vor dem Replay Bytegleichheit mit `main`. Das war für normale Validierung sinnvoll, hatte aber einen entscheidenden Nachteil:
 
-Zusätzlich prüft `tests/deep/test_cross_mode_matrix.py` 9.600 deterministische Snapshots aus:
+> Sobald ein Pull Request absichtlich eine produktive Package-Datei änderte, brach der Job vor dem Replay ab.
+
+Damit konnte ausgerechnet ein produktiver Fix nicht vollständig vor dem Merge geprüft werden.
+
+Jetzt gilt:
+
+1. Der Test listet verständlich auf, welche produktiven Dateien vom aktuellen `main` abweichen.
+2. Anschließend läuft das Replay mit genau dem Code des Pull Requests.
+3. Eine produktive Änderung wird nicht mehr pauschal blockiert, sondern tatsächlich geprüft.
+
+Beispiel aus der EVOpt-Korrektur:
 
 ```text
-4 Betriebsarten
-× 4 Tageszeiten
-× 6 SoC-Stufen
-× 5 PV-Leistungsstufen
-× 4 Verbrauchsstufen
-× 4 Prognosestufen
-× EVOpt normal/holdcharge im EVOpt-Modus
+Produktive Datei unter Test:
+package/se_controller_80_charge_writer.yaml
 ```
 
-Eine weitere Sequenz schaltet alle vier Modi nacheinander um und erwartet ausschließlich die kontrollierte synthetische Write-Folge:
+## Pflichtregression für den echten EVOpt-Live-Fehler
+
+Am 23.07.2026 zeigte der reale Write-Watchdog:
 
 ```text
-5000 W → 0 W → 5000 W → 0 W
+Wert=5000 raw=holdcharge stable=holdcharge block=on target_stable_s=90
+Wert=0    raw=holdcharge stable=holdcharge block=on target_stable_s=0
 ```
 
-## Referenzmodell
+Einfache Bedeutung: EVOpt verlangte eindeutig eine Ladesperre, aber der Writer öffnete kurzzeitig trotzdem auf `5000 W`. Der Emergency-/Fail-open-Pfad umging den ersten Schutz.
 
-`testbench/reference/controller_model.py` ist absichtlich unabhängig von Home Assistant und den Jinja-Templates. Das Modell definiert:
+Dieser Fall ist jetzt in drei unabhängigen Ebenen Pflichtbestandteil:
 
+### 1. Unabhängiges Writer-Modell
+
+`testbench/reference/writer_policy.py` beschreibt die Sicherheitsregel ohne Home Assistant und ohne produktive YAML-Datei:
+
+```text
+EVOpt aktiv
+UND raw=holdcharge ODER stable=holdcharge ODER charge_block=on
+UND Ziel=5000 W
+=> Write verboten
+```
+
+Das gilt auch bei `emergency_open=true`.
+
+### 2. Direkte Auswertung der produktiven Jinja-Logik
+
+`tests/deep/test_writer_template_regression.py` lädt die echte Datei:
+
+```text
+package/se_controller_80_charge_writer.yaml
+```
+
+Die produktiven Jinja-Ausdrücke werden mit exakt dem Live-Fehlerzustand ausgeführt. Erwartet wird zwingend:
+
+```text
+evopt_restrictive_active = true
+evopt_release_ready = false
+permissive_open_stable = false
+priority_open_write = false
+write_allowed = false
+```
+
+### 3. Vertragstest der Writer-Datei
+
+`tests/test_evopt_writer_release_guard.py` stellt zusätzlich sicher:
+
+- alle drei restriktiven Signale werden berücksichtigt;
+- Emergency-/Fail-open kann sie nicht umgehen;
+- `0 W` bleibt sofort möglich;
+- eine normale Freigabe benötigt 20 Minuten stabile EVOpt-Rohaktion plus 90 Sekunden stabilen finalen Sollwert;
+- es existiert weiterhin genau ein `number.set_value`.
+
+## Unabhängiges Controller-Referenzmodell
+
+`testbench/reference/controller_model.py` bleibt unabhängig von Home Assistant und den produktiven Jinja-Templates. Es modelliert unter anderem:
+
+- die vier Betriebsarten;
 - Safety-Gates;
-- die vier Modusanforderungen;
-- EVOpt-Hold und 20-Minuten-Fallback;
+- EVOpt-Aktionen und Fallback;
 - restriktive und permissive Übergänge;
-- 90 Sekunden Stabilität vor einer Öffnung;
-- 180 Sekunden Writer-Cooldown;
-- 180 Sekunden `holdcharge`-Latch;
-- Mindestdifferenz und doppelte Writes;
-- Fake-Time-Sequenzen und Write-Protokolle.
+- Zeitabläufe, Cooldown und Mindestdifferenzen;
+- synthetische Write-Protokolle.
 
-Das Modell ersetzt nicht die Produktivlogik. Es dient als unabhängige Sollinstanz für Tests und macht Abweichungen sichtbar.
-
-## Property-Tests
-
-Hypothesis erzeugt Kombinationen aus:
-
-```text
-4 Modi
-SoC innerhalb und außerhalb 0…100 %
-Kapazität innerhalb und außerhalb gültiger Bereiche
-PV und Verbrauch bis 30 kW
-Prognosen bis 150 kWh und ungültige negative Werte
-EVOpt-Aktionen und Health-Zustände
-Tag- und Nachtzeiten
-0- und 5000-W-Ausgangszuständen
-```
-
-Globale Invarianten:
-
-```text
-0 <= Ziel <= 5000 W
-Master/Site/Config/Sanity/Risk-Gate aus => kein Write
-identischer Sollwert => kein Write
-restriktiv => sofort
-permissiv => erst nach Stabilität und Cooldown
-keine NaN-/Inf-Ausgabe
-keine Exception bei ungültigen Messwerten
-```
-
-## Fake-Time-Tests
-
-`ControllerSequence` bewegt Zeit ohne reales Warten. Geprüft werden unter anderem:
-
-- kein `0 → 5000 → 0` beim EVOpt-Startup;
-- Fallback erst nach 1200 Sekunden EVOpt-Ausfall;
-- zusätzliche 90 Sekunden Stabilität vor permissiver Öffnung;
-- `holdcharge` bleibt 180 Sekunden gelatcht;
-- restriktives Schließen ignoriert Cooldown;
-- Tages-/Fensterende erzeugt genau einen Schließvorgang;
-- Recovery nach EVOpt-Ausfall;
-- Moduswechsel während einer laufenden Write-Sequenz.
+Das Modell ersetzt die Produktivlogik nicht. Es dient als unabhängige Sollinstanz. Eine Abweichung zwischen Modell und Produktivcode soll den Test rot machen.
 
 ## Fake evcc
 
-Der Server `testbench/fake_evcc/app.py` stellt `/api/state` bereit und kann während eines Tests umgeschaltet werden:
+`testbench/fake_evcc/app.py` stellt eine kontrollierbare `/api/state` bereit. Geprüft werden unter anderem:
 
 ```text
 normal
@@ -158,7 +165,7 @@ http_500
 timeout
 ```
 
-Beispiel:
+Beispiel für einen lokalen Test:
 
 ```bash
 python -m testbench.fake_evcc.app --port 7070 --scenario holdcharge
@@ -166,19 +173,17 @@ curl http://127.0.0.1:7070/api/state
 curl -X POST http://127.0.0.1:7070/__scenario/normal
 ```
 
-## Home-Assistant-Container-Test
+## Home-Assistant-Tests
 
 `scripts/run_ha_smoke.sh`:
 
-1. erstellt eine temporäre neutrale HA-Konfiguration;
+1. erstellt eine temporäre neutrale Home-Assistant-Konfiguration;
 2. installiert die echten Projektdateien mit dem portablen Installer;
-3. ergänzt ausschließlich für den Test eine synthetische Runtime-Datei;
-4. führt `check_config` mit dem gepinnten Home-Assistant-Image `2026.7.3` aus;
-5. startet denselben Stand als Container;
-6. mappt Batterie, PV, Verbrauch, Prognose und Charge-Limit auf synthetische Entities;
-7. schaltet alle vier Betriebsarten in der echten Home-Assistant-Package-Laufzeit um;
-8. prüft `config_check=ok`, `sanity_check=ok` und einen nach dem Test ausgeschalteten Master;
-9. speichert Installer-, Check-, Home-Assistant- und Ergebnislogs als Artefakte.
+3. verwendet ausschließlich synthetische Test-Entities;
+4. führt `check_config` aus;
+5. startet Home Assistant im Container;
+6. prüft Config, Sanity und den ausgeschalteten Master;
+7. speichert Logs und Ergebnisse als Artefakte.
 
 Die synthetische Writer-Entity lautet:
 
@@ -188,58 +193,77 @@ number.test_storage_charge_limit
 
 Sie hat keine Verbindung zu Modbus oder realer Hardware.
 
-Der erfolgreiche Referenzlauf vom 22.07.2026 ergab:
+## 96-Stunden-Replay
 
-| Modus | effektiver Modus | aktive Steuerung | Ziel |
-|---|---|---|---:|
-| Eigenverbrauch maximieren | Eigenverbrauch maximieren | Eigenverbrauch | 5000 W |
-| Netzdienlich laden | Netzdienlich laden | Netzdienliche Planung | 0 W |
-| Akku schonen | Akku schonen | Akku schonen | 0 W |
-| EVOpt optimiert | EVOpt optimiert | Netzdienlicher Fallback | 0 W |
-
-EVOpt läuft in diesem Container bewusst ohne externe API-Verbindung und muss deshalb sauber auf die netzdienliche Ersatzplanung zurückfallen. Die echte EVOpt-Aktionsmatrix wird separat gegen den Fake-evcc-Server und im Referenzmodell geprüft.
-
-Dieser Test prüft die tatsächliche Home-Assistant-Konfiguration, Entity-Erzeugung, Modusumschaltung und Controller-Arbitration. Er prüft keine reale SolarEdge-Modbus-Kommunikation. Firmware-, Register- und Geräteeffekte bleiben Bestandteil der kontrollierten Hardware-Abnahme.
-
-## GitHub Actions
-
-`.github/workflows/deep-testbench.yml` enthält getrennte Jobs:
+`scripts/run_ha_24h_replay.sh` spielt denselben anonymisierten Messtag durch alle vier Betriebsarten:
 
 ```text
-static-architecture
-model-matrix-property-state
-fake-evcc-api
-home-assistant-2026.7.3-smoke
-release-installer-rollback
-deep-release-gate
+4 Betriebsarten
+× 24 simulierte Stunden
+= 96 simulierte Stunden
+= 384 Entscheidungen im 15-Minuten-Raster
 ```
 
-Der abschließende Gate-Job wird nur grün, wenn alle vorherigen Stufen erfolgreich sind.
+Der produktive Session-Manager und der produktive Charge-Limit-Writer laufen in Home Assistant. Geschrieben wird nur auf das synthetische Testregister.
 
-## Verifizierter Teststand
-
-Für den geprüften Pull-Request-Stand waren erfolgreich:
+Der erfolgreich geprüfte EVOpt-Hard-Block-Stand ergab:
 
 ```text
-29 / 29 feste Szenarien
-9.600 deterministische Vier-Modi-Snapshots
-52 Python-Modell-, Property- und Zustandsmaschinentests
-98,06 % Line-Coverage des unabhängigen Referenzmodells
-alle Fake-evcc-Aktionen und Transportfehler
-Home Assistant 2026.7.3 check_config und Runtime-Start
-alle vier Modi in der HA-Package-Laufzeit umgeschaltet
-Config Check: ok
-Sanity Check: ok
-Master nach dem Test: aus
-Release-ZIP, SHA256 und Manifest: PASS
-Deep Release Gate: PASS
+3 notwendige Writer-Aufrufe
+0 nicht erlaubte Writer
+0 harte Steuerungsfehler
+0 unerwünschte 0↔5000-W-Roundtrips
+Controller-Master am Ende: off
+```
+
+Der Test kann zuverlässig sagen:
+
+- ob die Steuerung korrekt geöffnet oder geschlossen hat;
+- wie oft geschrieben wurde;
+- ob ein fremder Writer geschrieben hat;
+- ob ein unnötiger Roundtrip erkannt wurde;
+- ob Safety- und Writer-Regeln eingehalten wurden.
+
+Er kann noch nicht beweisen:
+
+- ob eine reale Batterie am Tagesende voll wäre;
+- welche reale Modbus-Latenz auftritt;
+- wie eine konkrete SolarEdge-Firmware reagiert;
+- wie stark EEPROM oder Flash real belastet werden.
+
+## Codespaces
+
+1. Repository oder Pull Request öffnen.
+2. **Code → Codespaces → Create codespace** wählen.
+3. Warten, bis `postCreateCommand` abgeschlossen ist.
+4. Im Terminal ausführen:
+
+```bash
+bash scripts/run_deep_tests.sh all
+bash scripts/run_ha_smoke.sh
+bash scripts/run_ha_24h_replay.sh
+```
+
+Für die interaktive Fake-evcc-/Home-Assistant-Umgebung:
+
+```bash
+docker compose -f docker/docker-compose.test.yml up --build
+```
+
+Ports:
+
+```text
+7070  Fake evcc
+8123  Home Assistant Testbench
 ```
 
 ## Artefakte
 
-Je nach Job werden hochgeladen:
+Je nach Job werden unter anderem gespeichert:
 
 ```text
+TEST_RESULT_READABLE.md
+production-files-under-test.txt
 readonly_audit.txt
 ruff.txt
 shellcheck.txt
@@ -250,35 +274,41 @@ coverage-html/
 installer.log
 check-config.log
 home-assistant.log
-report.json
+results/summary.json
+results/write_intents.jsonl
 Release-ZIP und SHA256
 ```
 
-## Branch Protection
+Für normale Nutzer ist `TEST_RESULT_READABLE.md` der erste Einstiegspunkt. Die technischen Dateien dienen der Ursachenanalyse.
 
-Für `main` sollten mindestens diese Checks verpflichtend werden:
+## Empfohlene Branch Protection
+
+Für `main` sollten mindestens diese Checks verpflichtend sein:
 
 ```text
 Validate SolarEdge HA Energy Controller / validate
+Verständliche Testergebnisse / Lesbarer YAML- und Installationscheck
+Deep SolarEdge Controller Testbench / codespaces-devcontainer
 Deep SolarEdge Controller Testbench / static-architecture
 Deep SolarEdge Controller Testbench / model-matrix-property-state
 Deep SolarEdge Controller Testbench / fake-evcc-api
+Deep SolarEdge Controller Testbench / home-assistant-2026.6.3-smoke
 Deep SolarEdge Controller Testbench / home-assistant-2026.7.3-smoke
+Deep SolarEdge Controller Testbench / main-production-real-day-24h
 Deep SolarEdge Controller Testbench / release-installer-rollback
 Deep SolarEdge Controller Testbench / deep-release-gate
 ```
 
-Die Einstellung erfolgt unter **Settings → Branches → Branch protection rules**. Force-Pushes sollten blockiert bleiben.
+Force-Pushes auf `main` sollten blockiert bleiben.
 
-## Grenzen
+## Grenzen und Live-Abnahme
 
-Der Deep Testbench kann nicht beweisen, dass jede SolarEdge-Firmware Register identisch behandelt. Nicht simuliert werden:
+Ein vollständig grüner GitHub-Test ist die Voraussetzung für einen Merge. Er ersetzt nicht die reale Abnahme.
 
-- physische Modbus-Latenz und Paketverlust;
-- gerätespezifische Flash-Persistenz;
-- Wechselrichter-/Batterie-Firmwareabweichungen;
-- reale Messwertverzögerungen anderer Integrationen;
-- reale EVOpt-Pläne mit der produktiven evcc-Instanz;
-- Netz- und Hardwareausfälle außerhalb der definierten Fehlerbilder.
+Nach Installation auf der Referenzanlage müssen mindestens geprüft werden:
 
-Dafür bleibt der dokumentierte Hardware-Abnahmetest erforderlich.
+- `ha core check` und First Checks erfolgreich;
+- nur der erlaubte Single Writer aktiv;
+- keine `5000-W`-Writes bei `raw=holdcharge`, `stable=holdcharge` oder `charge_block=on`;
+- keine unerwünschten `5000 → 0`-Roundtrips über einen ausreichend langen Realzeitraum;
+- Master bleibt während Installation und Prüfung ausgeschaltet und wird erst nach erfolgreicher Abnahme aktiviert.
