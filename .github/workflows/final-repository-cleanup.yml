@@ -1,0 +1,61 @@
+name: Final repository cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release-audit:
+    if: github.head_ref == 'maintenance/audit-and-mark-rc4-release-20260723'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit historical releases and mark RC4 as superseded
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for tag in v0.1.0-rc.2 v0.1.0-rc.3 v0.1.0-rc.4; do
+            if gh api "repos/${GH_REPO}/releases/tags/${tag}" >/dev/null 2>&1; then
+              echo "${tag}: GitHub-Prerelease vorhanden" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "${tag}: kein GitHub-Release vorhanden" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          release_json="$(gh api "repos/${GH_REPO}/releases/tags/v0.1.0-rc.4")"
+          release_id="$(jq -r '.id' <<<"$release_json")"
+          asset_names="$(jq -r '.assets[].name' <<<"$release_json")"
+
+          grep -Fxq 'SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip' <<<"$asset_names"
+          grep -Fxq 'SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256' <<<"$asset_names"
+
+          body=$'# Veraltet – nicht mehr installieren\n\nDieses Prerelease bleibt nur zur historischen Nachvollziehbarkeit erhalten.\n\nDer Tag v0.1.0-rc.4 enthält noch nicht den finalen EVOpt-Hard-Block aus PR #39 und nicht den Runtime-Checker-Fix aus PR #41. Die vorhandenen ZIP- und SHA256-Dateien gehören korrekt zum damaligen Tag, dürfen aber nicht mehr als aktueller Installationsstand verwendet werden.\n\nAktueller Status und Realtest: Issue #31. Ein neues Prerelease wird erst nach bestandener Langzeitabnahme auf der realen Referenzanlage veröffentlicht.'
+
+          jq -n \
+            --arg name 'v0.1.0-rc.4 – VERALTET, NICHT INSTALLIEREN' \
+            --arg body "$body" \
+            '{name:$name,body:$body,prerelease:true,draft:false,make_latest:"false"}' \
+            > /tmp/release-patch.json
+
+          gh api --method PATCH \
+            "repos/${GH_REPO}/releases/${release_id}" \
+            --input /tmp/release-patch.json >/dev/null
+
+          updated="$(gh api "repos/${GH_REPO}/releases/tags/v0.1.0-rc.4")"
+          test "$(jq -r '.name' <<<"$updated")" = 'v0.1.0-rc.4 – VERALTET, NICHT INSTALLIEREN'
+          test "$(jq -r '.prerelease' <<<"$updated")" = true
+          test "$(jq -r '.draft' <<<"$updated")" = false
+
+          echo 'RC4 wurde als veraltetes historisches Prerelease markiert.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ZIP und SHA256-Asset sind vorhanden.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Tags und Assets wurden nicht verändert.' >> "$GITHUB_STEP_SUMMARY"
+
+          gh api --method DELETE \
+            "repos/${GH_REPO}/git/refs/heads/maintenance/audit-and-mark-rc4-release-20260723"
