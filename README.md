@@ -17,7 +17,7 @@ Der Controller unterstützt vier Betriebsarten:
 
 **Version: `v0.1.0-rc.4` – Release Candidate / Prerelease**
 
-RC4 behebt unnötige Charge-Limit-Zyklen beim Home-Assistant-/EVOpt-Startup und veröffentlicht den auf der Referenzinstallation getesteten Write-Watchdog.
+RC4 schützt den einzigen SolarEdge-Writer gegen unnötige Charge-Limit-Zyklen beim Home-Assistant-/EVOpt-Startup und gegen den live beobachteten Fall, dass Fail-open trotz eindeutigem `holdcharge` kurzzeitig `5000 W` schrieb.
 
 Wesentliche Eigenschaften:
 
@@ -25,12 +25,12 @@ Wesentliche Eigenschaften:
 - genau ein Writer je gemapptem SolarEdge-Ziel;
 - EVOpt-Startup-Handover hält bei kurzen Ausfällen den zuletzt bestätigten SolarEdge-Zustand;
 - vollständiger Legacy-Fallback erst nach 20 Minuten durchgehendem EVOpt-Ausfall;
-- `holdcharge` sperrt sofort und bleibt 180 Sekunden gelatcht;
-- Freigabe auf `5000 W` erst nach 90 Sekunden stabilem finalem Sollwert;
+- `holdcharge` sperrt sofort; `raw=holdcharge`, `stable=holdcharge` oder `charge_block=on` blockieren jeden permissiven Write – auch bei Fail-open;
+- EVOpt-Freigabe auf `5000 W` erst nach 20 Minuten stabiler nicht-restriktiver Rohaktion plus 90 Sekunden stabilem finalem Sollwert;
 - Master, Site-Bestätigung, EVOpt-Aktivierung und EVOpt-URL bleiben über Neustarts erhalten;
 - Write-Watchdog `1.0.2` mit Service-Trace, Context-Kette, Writer-Scan, Roundtrip- und EVOpt-Konsistenzprüfung;
 - Installation, Update und dateibezogener Rollback;
-- SHA256-Paritätsnachweis: alle 18 veröffentlichten YAML-Dateien sind byteidentisch mit dem geprüften Live-Export vom 22.07.2026.
+- SHA256-Paritätsnachweis für alle 18 veröffentlichten YAML-Dateien; der korrigierte Writer ist zusätzlich durch den Live-Fehler-Regressionsfall und ein 96-Stunden-Replay geprüft.
 
 Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarEdge-Modelle, Integrationen und Entity-Namen müssen über das Site-Mapping angepasst und auf der jeweiligen Anlage geprüft werden.
 
@@ -223,7 +223,7 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 
 ## Tiefgreifende Testumgebung
 
-Das Repository enthält einen hardwarefreien Deep Testbench mit festen Tag-/Nacht-/PV-/SoC-Szenarien, Property-Tests, Fake-Time-Zustandsmaschinen, einem kontrollierbaren Fake-evcc-Server und Home-Assistant-Container-Tests. Die Pflichtmatrix prüft Home Assistant 2026.7.3 und 2026.6.3; der vollständige 24h-Replay spielt denselben Tagesverlauf durch alle vier Betriebsarten. Codespaces und GitHub Actions verwenden dieselben Einstiegsskripte.
+Das Repository enthält einen hardwarefreien Deep Testbench mit festen Tag-/Nacht-/PV-/SoC-Szenarien, Property-Tests, Fake-Time-Zustandsmaschinen, einem kontrollierbaren Fake-evcc-Server und Home-Assistant-Container-Tests. Jede Teststufe erklärt in normaler Sprache, was geprüft wurde, was Grün oder Rot bedeutet und was als Nächstes zu tun ist. Die Pflichtmatrix prüft Home Assistant 2026.7.3 und 2026.6.3; der vollständige 24h-Replay spielt denselben Tagesverlauf durch alle vier Betriebsarten. Codespaces und GitHub Actions verwenden dieselben Einstiegsskripte.
 
 ```bash
 bash scripts/run_deep_tests.sh all
@@ -243,7 +243,7 @@ Eigene Testtage werden ausschließlich lokal und über ein Rollen-Allowlisting e
 - Site-Konfiguration, Config Check und Sanity Check müssen gültig sein.
 - Leere optionale Writer-Mappings deaktivieren den jeweiligen Writer.
 - EVOpt schreibt nie direkt auf SolarEdge.
-- Kurze EVOpt-Ausfälle öffnen den Speicher im EVOpt-Modus nicht automatisch.
+- Kurze EVOpt-Ausfälle öffnen den Speicher im EVOpt-Modus nicht automatisch. Ein aktives restriktives EVOpt-Signal kann nicht durch Emergency-/Fail-open umgangen werden.
 - Weitere Automationen dürfen nicht auf dieselben gemappten SolarEdge-Ziele schreiben.
 - Der Watchdog ist read-only; er beobachtet Schreibaufrufe, erzeugt aber selbst keine SolarEdge-Befehle.
 - Test-Fixtures und HA-Container verwenden ausschließlich synthetische Writer-Ziele; ein Merge der Testbench verändert keine laufende Home-Assistant-Instanz.
