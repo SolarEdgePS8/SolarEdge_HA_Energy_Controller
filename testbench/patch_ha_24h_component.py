@@ -143,6 +143,19 @@ def patch(path: Path) -> None:
                 str(value),
                 {"unit_of_measurement": unit, "source": "se_test_replay"},
             )
+
+        # The real SolarEdge integration reports its current number value on
+        # every polling cycle even when the value itself does not change.
+        # Re-report the unchanged test target directly to Home Assistant so
+        # last_reported stays fresh without creating a number.set_value call.
+        target = self.hass.states.get(TARGET)
+        if target is None:
+            raise RuntimeError(f"missing replay target: {TARGET}")
+        self.hass.states.async_set(
+            TARGET,
+            target.state,
+            dict(target.attributes),
+        )
         self.evopt(row)
         await self.settle()
 ''',
