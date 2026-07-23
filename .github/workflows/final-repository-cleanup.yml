@@ -1,0 +1,98 @@
+name: Final repository cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    if: github.head_ref == 'maintenance/final-repository-cleanup-20260723'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete closed PR branches and obsolete comments
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          branches=(
+            'agent/prepare-v0.1.0-rc.2'
+            'fix/rc3-release-hardening'
+            'release/v0.1.0-rc.4'
+            'release/v0.1.0-rc.4-publish'
+            'fix/main-ci-after-rc4'
+            'fix/main-green-check'
+            'maintenance/set-repository-about'
+            'docs/project-description-and-migration'
+            'fix/ci-backup-collision-node24'
+            'docs/sensor-sources-portable-mapping'
+            'docs/sensor-docs-validation-status'
+            'test/deep-codespaces-testbench'
+            'test/testbench-hardening'
+            'test/testbench-hardening-squash-source'
+            'test/post-merge-testbench-verification'
+            'validation/final-testbench-main-status'
+            'test/async-fixture-io'
+            'fix/evopt-night-flapping'
+            'test/readable-results'
+            'fix/live-validated-evopt-latch'
+            'fix/evopt-latch-final'
+            'fix/evopt-latch-bootstrap'
+            'fix/evopt-writer-release-guard'
+            'validation/post-evopt-writer-guard'
+            'fix/evopt-hard-block-live-regression'
+            'docs/evopt-hard-block-clarity'
+            'fix/runtime-checker-rc4-version'
+            'maintenance/cleanup-stale-branches-20260723'
+          )
+
+          echo '## Branch cleanup' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          for branch in "${branches[@]}"; do
+            if gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/${branch}" >/dev/null 2>&1; then
+              echo "- gelöscht: \`${branch}\`" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- bereits nicht vorhanden: \`${branch}\`" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          comments=(
+            5055866914
+            5058121227
+            5058462050
+            5057645029
+            5058127389
+            5057779000
+            5057776650
+            5057774254
+            5057899377
+            5058123053
+            5058424811
+            5058688903
+            5054647949
+          )
+
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo '## Comment cleanup' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          for comment_id in "${comments[@]}"; do
+            if gh api --method DELETE "repos/${GH_REPO}/issues/comments/${comment_id}" >/dev/null 2>&1; then
+              echo "- gelöscht: Kommentar ${comment_id}" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- bereits nicht vorhanden oder nicht löschbar: Kommentar ${comment_id}" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo 'Der aktuelle Live-Test-Kommentar in Issue #31 bleibt erhalten.' >> "$GITHUB_STEP_SUMMARY"
+
+          gh api --method DELETE \
+            "repos/${GH_REPO}/git/refs/heads/maintenance/final-repository-cleanup-20260723"
