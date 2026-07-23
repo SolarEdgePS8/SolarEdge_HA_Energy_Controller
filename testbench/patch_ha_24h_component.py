@@ -119,6 +119,27 @@ def patch(path: Path) -> None:
 
     text = replace_once(
         text,
+        '''        for entity in ("input_boolean.se_nf_site_config_confirmed", "input_boolean.se_nf_evopt_shadow_enabled", "input_boolean.se_netzdienlich_debug", "input_boolean.se_netzdienlich_enabled"):
+            await self.svc("input_boolean", "turn_on", entity)
+        await self.clock(self.now + timedelta(minutes=5))
+''',
+        '''        # Configure all prerequisites while the controller master remains
+        # off. prepare_day() enables the master only after mode, target backing,
+        # cooldown and timestamps are deterministic. This prevents a real
+        # time-pattern writer trigger from racing the first test slot.
+        for entity in (
+            "input_boolean.se_nf_site_config_confirmed",
+            "input_boolean.se_nf_evopt_shadow_enabled",
+            "input_boolean.se_netzdienlich_debug",
+        ):
+            await self.svc("input_boolean", "turn_on", entity)
+        await self.clock(self.now + timedelta(minutes=5))
+''',
+        "configure-master-gate",
+    )
+
+    text = replace_once(
+        text,
         '''        for entity, value in values.items():
             await self.svc("input_number", "set_value", entity, value=value)
         self.evopt(row)
@@ -233,6 +254,47 @@ def patch(path: Path) -> None:
                     snap = self.snapshot(row)
 ''',
         "replay-loop",
+    )
+
+    text = replace_once(
+        text,
+        '''        finally:
+            for name, rows in (("snapshots.jsonl", self.snapshots), ("events.jsonl", self.events), ("write_intents.jsonl", self.intents), ("actual_changes.jsonl", self.changes)):
+                with (self.output / name).open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\\n")
+            (self.output / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+            dt_util.now, dt_util.utcnow = self.old_now, self.old_utcnow
+''',
+        '''        finally:
+            def write_results() -> None:
+                for name, rows in (
+                    ("snapshots.jsonl", self.snapshots),
+                    ("events.jsonl", self.events),
+                    ("write_intents.jsonl", self.intents),
+                    ("actual_changes.jsonl", self.changes),
+                ):
+                    with (self.output / name).open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(
+                                json.dumps(
+                                    row,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                )
+                                + "\\n"
+                            )
+                (self.output / "summary.json").write_text(
+                    json.dumps(summary, indent=2, ensure_ascii=False) + "\\n",
+                    encoding="utf-8",
+                )
+
+            # Home Assistant treats synchronous file I/O in the event loop as a
+            # defect. Keep diagnostic persistence off the loop as well.
+            await asyncio.to_thread(write_results)
+            dt_util.now, dt_util.utcnow = self.old_now, self.old_utcnow
+''',
+        "async-result-persistence",
     )
 
     path.write_text(text, encoding="utf-8")
