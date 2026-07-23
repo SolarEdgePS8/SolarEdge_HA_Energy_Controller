@@ -54,3 +54,5 @@ Der Bericht wurde mehrfach für denselben Zeitraum wiederholt. Seit Beginn des T
 Der Live-Nachweis bestätigt das Ausbleiben der zuvor beobachteten Schreibzyklen im geprüften Zeitraum. Er beweist nicht das Verhalten jeder SolarEdge-Firmware oder jeder fremden Home-Assistant-Installation. Deshalb bleibt der Write-Watchdog nach Installation aktiv und der Stand wird weiterhin als Release Candidate behandelt.
 
 Abnahmegrundlage sind der lokale Write-Watchdog und die vollständigen GitHub-Actions-Prüfungen dieses Pull Requests. Der PR enthält ausschließlich die dokumentierte 20-Minuten-Freigabestabilisierung und deren Tests.
+
+Der abschließende CI-Lauf wird auf genau diesem dokumentierten Stand ausgeführt.
