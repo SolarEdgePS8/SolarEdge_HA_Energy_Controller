@@ -55,4 +55,4 @@ Der Live-Nachweis bestätigt das Ausbleiben der zuvor beobachteten Schreibzyklen
 
 Abnahmegrundlage sind der lokale Write-Watchdog und die vollständigen GitHub-Actions-Prüfungen dieses Pull Requests. Der PR enthält ausschließlich die dokumentierte 20-Minuten-Freigabestabilisierung und deren Tests.
 
-Der abschließende CI-Lauf wird auf genau diesem dokumentierten Stand ausgeführt.
+Der abschließende CI-Lauf wird auf genau diesem dokumentierten Stand ausgeführt. Der Patchlauf ist auf den fest benannten Repository-Branch begrenzt.
