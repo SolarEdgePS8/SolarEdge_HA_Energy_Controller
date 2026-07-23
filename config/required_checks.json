@@ -1,0 +1,15 @@
+{
+  "branch": "main",
+  "require_pull_request": true,
+  "require_conversation_resolution": true,
+  "require_linear_history": false,
+  "dismiss_stale_reviews": true,
+  "required_checks": [
+    "Validate SolarEdge HA Energy Controller / validate",
+    "Deep SolarEdge Controller Testbench / deep-release-gate"
+  ],
+  "informational_checks": [
+    "Nightly Home Assistant Stable Compatibility / stable-smoke-and-24h-replay"
+  ],
+  "note": "Repository rules must be configured in GitHub Settings. This file is the versioned project policy and does not itself change GitHub permissions."
+}
