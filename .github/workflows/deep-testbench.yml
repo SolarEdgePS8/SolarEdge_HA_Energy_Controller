@@ -143,6 +143,60 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  stable-preview:
+    name: stable-preview-nonblocking
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Exercise current Home Assistant stable image without blocking the release gate
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/stable-preview
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/stable-preview/smoke \
+            bash scripts/run_ha_smoke.sh
+          smoke_rc=$?
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/stable-preview/replay \
+          HA_24H_REPLAY_TIMEOUT=600 \
+            bash scripts/run_ha_24h_replay.sh
+          replay_rc=$?
+          python3 - "$smoke_rc" "$replay_rc" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          smoke = int(sys.argv[1])
+          replay = int(sys.argv[2])
+          Path("artifacts/stable-preview/status.json").write_text(
+              json.dumps(
+                  {
+                      "blocking": False,
+                      "image": "ghcr.io/home-assistant/home-assistant:stable",
+                      "pass": smoke == 0 and replay == 0,
+                      "smoke_exit": smoke,
+                      "replay_exit": replay,
+                  },
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          if [ "$smoke_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ]; then
+            echo "::warning title=Stable preview::Current stable image needs review; this preview is intentionally non-blocking."
+            bash scripts/collect_failure_bundle.sh stable-preview artifacts/stable-preview || true
+          fi
+          exit 0
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: stable-preview-${{ github.sha }}
+          path: artifacts/stable-preview
+          if-no-files-found: error
+          retention-days: 30
+
   real-day-24h:
     name: main-production-real-day-24h
     runs-on: ubuntu-latest
