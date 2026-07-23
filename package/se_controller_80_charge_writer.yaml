@@ -11,13 +11,16 @@ automation:
         event: start
       - platform: time_pattern
         minutes: "/5"
-      # Erneute Prüfung nach der sicheren Öffnungsstabilisierung.
-      # 0 W wird über den vorhandenen Sofort-Trigger weiterhin direkt gesetzt.
+      # Erneute Prüfung nach der allgemeinen Öffnungsstabilisierung.
       - platform: state
         entity_id: sensor.se_nf_desired_target
         for: "00:01:30"
-      # Nur der bereits arbitrierte Endwert triggert den Writer.
-      # Upstream-/Diagnosesensoren dürfen keine Zwischenzustände direkt auslösen.
+      # Nach 20 Minuten stabiler EVOpt-Rohaktion wird die Freigabe gezielt
+      # erneut geprüft. Restriktives holdcharge wirkt weiterhin sofort.
+      - platform: state
+        entity_id: sensor.se_nf_evopt_action_raw
+        for: "00:20:00"
+      # Nur der bereits arbitrierte Endwert und zentrale Freigaben triggern.
       - platform: state
         entity_id:
           - sensor.se_nf_desired_target
@@ -44,25 +47,20 @@ automation:
           lock_active: "{{ is_state('binary_sensor.se_nf_write_lock_active','on') }}"
           target_open_plausible: >-
             {% set s = states('input_select.se_nf_session_state') %}
-
             {% set start_ts = states('sensor.se_nf_active_planned_start_timestamp') | int(0) %}
-
             {% set now_i = now().timestamp() | int(0) %}
-
             {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
-
             {% set evopt_open = selected == 'EVOpt optimiert'
                and is_state('binary_sensor.se_nf_evopt_active_control','on')
                and states('sensor.se_nf_evopt_action_raw') != 'holdcharge'
                and not is_state('binary_sensor.se_nf_evopt_charge_block_request','on') %}
-
             {% set self_open = selected == 'Eigenverbrauch maximieren' %}
-
-            {% set fail_open = not is_state('input_boolean.se_netzdienlich_enabled','on') or not is_state('sensor.se_nf_config_check','ok') or
-            not is_state('sensor.se_nf_sanity_check','ok') %}
-
-            {{ fail_open or self_open or evopt_open or s in ['evcc_override','low_soc','risk'] or (s in ['open','battery_full_open'] and start_ts
-            > 0 and now_i >= start_ts) }}
+            {% set fail_open = not is_state('input_boolean.se_netzdienlich_enabled','on')
+               or not is_state('sensor.se_nf_config_check','ok')
+               or not is_state('sensor.se_nf_sanity_check','ok') %}
+            {{ fail_open or self_open or evopt_open
+               or s in ['evcc_override','low_soc','risk']
+               or (s in ['open','battery_full_open'] and start_ts > 0 and now_i >= start_ts) }}
           target_open_is_risk: >-
             {{ is_state('input_select.se_nf_session_state','risk') }}
           session_state_stable_s: >-
@@ -71,12 +69,22 @@ automation:
           target_value_stable_s: >-
             {{ (now().timestamp() | int(0)) -
                (as_timestamp(states.sensor.se_nf_desired_target.last_changed, 0) | int(0)) }}
+          evopt_action_stable_s: >-
+            {{ (now().timestamp() | int(0)) -
+               (as_timestamp(states.sensor.se_nf_evopt_action_raw.last_changed, 0) | int(0)) }}
           emergency_open: >-
             {{ not is_state('input_boolean.se_netzdienlich_enabled','on')
                or not is_state('sensor.se_nf_config_check','ok')
                or not is_state('sensor.se_nf_sanity_check','ok') }}
+          evopt_release_ready: >-
+            {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+            {% set raw = states('sensor.se_nf_evopt_action_raw') %}
+            {{ selected != 'EVOpt optimiert'
+               or emergency_open
+               or (raw != 'holdcharge' and evopt_action_stable_s | int(0) >= 1200) }}
           permissive_open_stable: >-
-            {{ emergency_open or target_value_stable_s | int(0) >= 90 }}
+            {{ emergency_open
+               or (target_value_stable_s | int(0) >= 90 and evopt_release_ready) }}
           target_open_allowed: >-
             {{ target_open_plausible
                and (
@@ -121,6 +129,8 @@ automation:
                 configured_entity={{ configured_entity }}, fixed_entity={{ entity }},
                 priority_open={{ priority_open_write }},
                 target_stable_s={{ target_value_stable_s }},
+                evopt_action_stable_s={{ evopt_action_stable_s }},
+                evopt_release_ready={{ evopt_release_ready }},
                 emergency_open={{ emergency_open }},
                 cooldown_ok={{ cooldown_ok }}, lock_active={{ lock_active }},
                 allowed={{ write_allowed }}, reason={{ states('sensor.se_nf_decision_reason') }}
@@ -161,6 +171,8 @@ automation:
           cooldown_ok: "{{ cooldown_ok }}"
           lock_active: "{{ lock_active }}"
           target_stable_s: "{{ target_value_stable_s }}"
+          evopt_action_stable_s: "{{ evopt_action_stable_s }}"
+          evopt_release_ready: "{{ evopt_release_ready }}"
       - service: number.set_value
         data:
           entity_id: >-
