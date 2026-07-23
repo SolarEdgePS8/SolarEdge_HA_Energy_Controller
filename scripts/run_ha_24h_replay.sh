@@ -158,6 +158,17 @@ if grep -E "$fatal_pattern" "$ARTIFACTS/home-assistant.log"; then
   exit 1
 fi
 
+READABLE_REPORT="$ARTIFACTS/TEST_RESULT_READABLE.md"
+python "$ROOT/scripts/render_readable_test_result.py" \
+  --summary "$ARTIFACTS/results/summary.json" \
+  --snapshots "$ARTIFACTS/results/snapshots.jsonl" \
+  --fixture "$ROOT/testbench/fixtures/real_day_2026-07-21_15m.json" \
+  --output "$READABLE_REPORT"
+
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  cat "$READABLE_REPORT" >> "$GITHUB_STEP_SUMMARY"
+fi
+
 python - "$ARTIFACTS/results/summary.json" "$ARTIFACTS/results/snapshots.jsonl" <<'PY'
 from __future__ import annotations
 from collections import defaultdict

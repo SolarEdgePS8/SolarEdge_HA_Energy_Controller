@@ -1,0 +1,48 @@
+name: Verständliche Testergebnisse
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readable-validation:
+    name: Lesbarer YAML- und Installationscheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v6
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Prüfwerkzeuge installieren
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Verständlichen Bericht erzeugen
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/readable-results
+          python scripts/render_readable_validation_result.py \
+            --root . \
+            --output artifacts/readable-results/TEST_RESULT_READABLE.md
+          result=$?
+          cat artifacts/readable-results/TEST_RESULT_READABLE.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Bericht als Datei bereitstellen
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: readable-test-result-${{ github.sha }}
+          path: artifacts/readable-results/TEST_RESULT_READABLE.md
+          if-no-files-found: error
+          retention-days: 30
