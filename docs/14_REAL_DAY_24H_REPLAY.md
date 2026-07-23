@@ -2,7 +2,7 @@
 
 ## Ziel
 
-Dieser Test spielt einen vollständigen, anonymisierten Energie-Tag in 15-Minuten-Schritten durch alle vier Betriebsarten des SolarEdge HA Energy Controllers. Dabei werden sowohl das unabhängige Referenzmodell als auch die unveränderten produktiven Home-Assistant-Packages geprüft.
+Dieser Test spielt einen vollständigen, anonymisierten Energie-Tag in 15-Minuten-Schritten durch alle vier Betriebsarten des SolarEdge HA Energy Controllers. Pro Ausführung entstehen vier vollständige Tagesläufe und damit insgesamt 96 simulierte Stunden.
 
 Die Testumgebung verbindet sich niemals mit einer produktiven Home-Assistant-, evcc- oder SolarEdge-Instanz. Das Writer-Ziel ist ausschließlich:
 
@@ -48,6 +48,7 @@ Damit entstehen pro Ausführung:
 
 ```text
 96 Slots × 4 Modi = 384 Controller-Snapshots
+4 Modi × 24 Stunden = 96 simulierte Stunden
 ```
 
 ## Unabhängiges Referenzmodell
@@ -69,6 +70,23 @@ Das Modell prüft unter anderem:
 - EVOpt-Hold, Fallback und Recovery;
 - maximale Writer-Anzahl je Betriebsart.
 
+Zusätzlich prüft ein unabhängiges Writer-Sicherheitsmodell den echten Live-Fehlerfall:
+
+```text
+EVOpt optimiert
+raw = holdcharge
+stable = holdcharge
+charge_block = on
+emergency_open = true
+target = 5000 W
+```
+
+Erwartung:
+
+```text
+write_allowed = false
+```
+
 ## Home-Assistant-Runtime-Replay
 
 ```bash
@@ -86,13 +104,36 @@ Der Runner:
 7. schaltet den Master nach dem Test wieder aus;
 8. wertet Writer, Events, Zustandswechsel und Konflikte aus.
 
-Die vier Modusläufe verwenden aufeinanderfolgende simulierte Kalendertage. Zeit läuft daher niemals rückwärts. Innerhalb jedes Viertelstunden-Slots werden zusätzliche Zeitpunkte erzeugt, damit 60-, 90-, 120- und 180-Sekunden-Gates ohne reales Warten ausgelöst werden.
+Die vier Modusläufe verwenden aufeinanderfolgende simulierte Kalendertage. Zeit läuft daher niemals rückwärts. Innerhalb jedes Viertelstunden-Slots werden zusätzliche Zeitpunkte erzeugt, damit Zeitbedingungen ohne reales Warten ausgelöst werden. Dazu gehören unter anderem 60, 90, 120, 180 und 1200 Sekunden.
+
+## Welcher Produktionscode wird geprüft?
+
+Der GitHub-Actions-Job heißt:
+
+```text
+main-production-real-day-24h
+```
+
+Bei einem Pull Request listet der Workflow zuerst alle produktiven Dateien auf, die gegenüber `main` geändert wurden. Anschließend läuft das Replay mit genau dem Code des Pull Requests.
+
+Beispiel:
+
+```text
+Produktive Datei unter Test:
+package/se_controller_80_charge_writer.yaml
+```
+
+Eine beabsichtigte produktive Änderung führt damit nicht mehr zu einem Abbruch vor dem Replay. Sie wird tatsächlich in Home Assistant ausgeführt und geprüft.
+
+Bei einem Lauf auf `main` wird entsprechend der aktuelle Main-Produktionscode geprüft.
 
 ## Trace und Debugging
 
 Der Runtime-Test erzeugt:
 
 ```text
+TEST_RESULT_READABLE.md
+production-files-under-test.txt
 summary.json
 snapshots.jsonl
 events.jsonl
@@ -102,6 +143,8 @@ home-assistant.log
 check-config.log
 installer.log
 ```
+
+Für normale Nutzer ist `TEST_RESULT_READABLE.md` der erste Einstiegspunkt. Dort stehen Gesamtergebnis, getestete Modi, Writer-Anzahl, Flattern, Fehler und bekannte Grenzen in normaler Sprache.
 
 Jeder Snapshot enthält unter anderem:
 
@@ -121,43 +164,31 @@ Harte Fehler sind insbesondere:
 
 - weniger oder mehr als 96 Slots je Modus;
 - Charge-Limit außerhalb 0 bis 5000 W;
-- Config-/Sanity-Fehler oder aktives Risk-Flag;
+- Config-/Sanity-Fehler oder aktives Risk-Flag im normalen Testablauf;
 - `holdcharge` bei weiterhin offenem Charge-Limit;
+- ein permissiver Write bei `raw=holdcharge`, `stable=holdcharge` oder `charge_block=on`;
 - unbekannter Writer;
 - nicht klassifizierter schneller Roundtrip;
 - Controller-Master nach Testende weiterhin an.
 
 Fachlich erwartete Abweichungen werden separat gespeichert und führen nicht automatisch zu einem PASS. Sie müssen im Report begründet sein. Ein Beispiel ist `discharge`: Der aktuelle Charge-Arbiter kann keine Entladeleistung schreiben und muss deshalb auf die dokumentierte vorhandene Steuerungsmöglichkeit zurückfallen.
 
-## Prüfung gegen Main
+## Verifizierter korrigierter Writer-Stand
 
-Der GitHub-Actions-Job heißt:
-
-```text
-main-production-real-day-24h
-```
-
-Vor dem Replay prüft der Workflow per Git-Diff, dass gegenüber `main` folgende produktive Bereiche unverändert sind:
+Der vollständig grüne Lauf für den gehärteten EVOpt-Writer ergab:
 
 ```text
-package/
-custom_components/se_write_watchdog/
-scripts/install_package.sh
-scripts/runtime/
-audit/runtime/
+4 Betriebsarten
+96 simulierte Stunden
+384 Entscheidungen
+3 notwendige Writer-Aufrufe
+0 nicht erlaubte Writer
+0 harte Steuerungsfehler
+0 unerwünschte 0↔5000-W-Roundtrips
+Controller-Master am Ende: off
 ```
 
-Der 24-Stunden-Lauf testet somit den tatsächlichen Main-Produktionscode und keine für den Test angepasste Controller-Variante.
-
-## Vergleichbare Projekte
-
-Vor der Umsetzung wurden Testmuster aus EMHASS, OpenEMS, Akkudoktor EOS und evcc untersucht. Es wurde kein fremder Programmcode kopiert. Übernommen wurden nur allgemeine Verfahren:
-
-- feste Uhr und reproduzierbare Simulation;
-- Viertelstunden-Horizonte für PV, Last, Preise und SoC;
-- explizite Zeitstempel-, Mitternachts- und Tageswechseltests;
-- Energie-Bilanz je Zeitintervall;
-- getrennte Entscheidungs-, Event- und Konflikttraces.
+Zusätzlich waren direkte Tests der produktiven Jinja-Ausdrücke, das unabhängige Writer-Modell, beide gepinnten Home-Assistant-Versionen, Codespaces sowie Release/Installer/Rollback grün.
 
 ## Grenzen
 
@@ -167,7 +198,7 @@ Nicht simuliert werden:
 - SolarEdge-Firmware- und Registerabweichungen;
 - gerätespezifische Flash-Persistenz;
 - reale Messwertverzögerungen externer Integrationen;
-- ein vollständiger produktiver EVOpt-Tag;
+- ein vollständiger produktiver EVOpt-Tag der realen Anlage;
 - Hardware- und Netzfehler außerhalb der injizierten Fehlerbilder.
 
-Diese Punkte bleiben Bestandteil der kontrollierten Hardware-Abnahme.
+Der Replay kann deshalb nicht endgültig beweisen, dass der Fix auf jeder realen Anlage funktioniert. Nach Installation bleibt ein ausreichend langer Write-Watchdog-Live-Test erforderlich.
