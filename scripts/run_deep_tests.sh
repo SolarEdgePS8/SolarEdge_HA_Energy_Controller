@@ -92,6 +92,7 @@ run_model() {
     tests/deep/test_real_day_24h.py \
     tests/deep/test_fixture_contracts.py \
     tests/deep/test_writer_policy.py \
+    tests/deep/test_writer_template_regression.py \
     --junitxml="$ARTIFACTS/model-junit.xml" \
     --cov=testbench.reference \
     --cov-report=term-missing \
