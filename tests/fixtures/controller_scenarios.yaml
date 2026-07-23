@@ -1,0 +1,123 @@
+# Deterministic scenarios derived from the documented reference installation.
+# All values are synthetic. No private addresses, tokens or real consumption data.
+scenarios:
+  - id: self_day_open
+    mode: Eigenverbrauch maximieren
+    input: {now_minute: 720, soc_pct: 55, pv_power_w: 5200, home_power_w: 900, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: self_consumption, write: true}
+  - id: self_night_open
+    mode: Eigenverbrauch maximieren
+    input: {now_minute: 60, soc_pct: 70, pv_power_w: 0, home_power_w: 1300, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: self_consumption, write: true}
+  - id: self_master_off
+    mode: Eigenverbrauch maximieren
+    input: {master: false, current_charge_limit_w: 5000}
+    expect: {target_w: 5000, source: safety, write: false}
+  - id: self_risk_gate
+    mode: Eigenverbrauch maximieren
+    input: {risk: true, current_charge_limit_w: 0}
+    expect: {target_w: 0, source: safety, write: false}
+
+  - id: grid_before_window_closed
+    mode: Netzdienlich laden
+    input: {now_minute: 600, planned_start_minute: 705, latest_finish_minute: 855, soc_pct: 55, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: grid_friendly, write: true}
+  - id: grid_inside_window_open
+    mode: Netzdienlich laden
+    input: {now_minute: 750, planned_start_minute: 705, latest_finish_minute: 855, soc_pct: 55, current_charge_limit_w: 0, candidate_stable_s: 90}
+    expect: {target_w: 5000, source: grid_friendly, write: true}
+  - id: grid_after_window_closed
+    mode: Netzdienlich laden
+    input: {now_minute: 900, planned_start_minute: 705, latest_finish_minute: 855, soc_pct: 55, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: grid_friendly, write: true}
+  - id: grid_low_soc_emergency_open
+    mode: Netzdienlich laden
+    input: {now_minute: 540, soc_pct: 24.9, low_soc_floor_pct: 25, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: grid_friendly, write: true}
+  - id: grid_open_waits_stability
+    mode: Netzdienlich laden
+    input: {now_minute: 750, current_charge_limit_w: 0, candidate_stable_s: 89}
+    expect: {target_w: 5000, source: grid_friendly, write: false}
+  - id: grid_open_waits_cooldown
+    mode: Netzdienlich laden
+    input: {now_minute: 750, current_charge_limit_w: 0, candidate_stable_s: 120, seconds_since_last_write: 179}
+    expect: {target_w: 5000, source: grid_friendly, write: false}
+
+  - id: care_waits_before_window
+    mode: Akku schonen
+    input: {now_minute: 690, planned_start_minute: 855, latest_finish_minute: 990, soc_pct: 60, target_soc_pct: 90, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: battery_care, write: true}
+  - id: care_opens_in_window
+    mode: Akku schonen
+    input: {now_minute: 900, planned_start_minute: 855, latest_finish_minute: 990, soc_pct: 60, target_soc_pct: 90, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: battery_care, write: true}
+  - id: care_target_reached
+    mode: Akku schonen
+    input: {now_minute: 900, soc_pct: 90, target_soc_pct: 90, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: battery_care, write: true}
+  - id: care_latch_reached
+    mode: Akku schonen
+    input: {now_minute: 900, soc_pct: 80, target_soc_pct: 90, lifetime_target_reached: true, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: battery_care, write: true}
+  - id: care_reserve_guard
+    mode: Akku schonen
+    input: {now_minute: 600, soc_pct: 25, target_soc_pct: 90, backup_reserve_pct: 20, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: battery_care, write: true}
+
+  - id: evopt_holdcharge_closes
+    mode: EVOpt optimiert
+    input: {evopt_healthy: true, evopt_action: holdcharge, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: evopt, write: true}
+  - id: evopt_hold_closes
+    mode: EVOpt optimiert
+    input: {evopt_healthy: true, evopt_action: hold, current_charge_limit_w: 5000}
+    expect: {target_w: 0, source: evopt, write: true}
+  - id: evopt_normal_opens_after_stability
+    mode: EVOpt optimiert
+    input: {evopt_healthy: true, evopt_action: normal, current_charge_limit_w: 0, candidate_stable_s: 90}
+    expect: {target_w: 5000, source: evopt, write: true}
+  - id: evopt_charge_opens
+    mode: EVOpt optimiert
+    input: {evopt_healthy: true, evopt_action: charge, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: evopt, write: true}
+  - id: evopt_discharge_does_not_block_charge_limit
+    mode: EVOpt optimiert
+    input: {evopt_healthy: true, evopt_action: discharge, current_charge_limit_w: 0, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: evopt, write: true}
+  - id: evopt_startup_holds_closed
+    mode: EVOpt optimiert
+    input: {evopt_healthy: false, evopt_unavailable_age_s: 60, current_charge_limit_w: 0, now_minute: 750, candidate_stable_s: 120}
+    expect: {target_w: 0, source: evopt_hold_last_confirmed, write: false}
+  - id: evopt_startup_holds_open
+    mode: EVOpt optimiert
+    input: {evopt_healthy: false, evopt_unavailable_age_s: 60, current_charge_limit_w: 5000, now_minute: 600}
+    expect: {target_w: 5000, source: evopt_hold_last_confirmed, write: false}
+  - id: evopt_long_failure_falls_back_open
+    mode: EVOpt optimiert
+    input: {evopt_healthy: false, evopt_unavailable_age_s: 1200, current_charge_limit_w: 0, now_minute: 750, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: legacy_grid_friendly_fallback, write: true}
+  - id: evopt_long_failure_falls_back_closed
+    mode: EVOpt optimiert
+    input: {evopt_healthy: false, evopt_unavailable_age_s: 1201, current_charge_limit_w: 5000, now_minute: 600}
+    expect: {target_w: 0, source: legacy_grid_friendly_fallback, write: true}
+
+  - id: invalid_soc_blocks_writer
+    mode: Netzdienlich laden
+    input: {soc_pct: 120, current_charge_limit_w: 5000}
+    expect: {target_w: 5000, source: safety, write: false}
+  - id: invalid_capacity_blocks_writer
+    mode: Akku schonen
+    input: {battery_capacity_kwh: 0, current_charge_limit_w: 0}
+    expect: {target_w: 0, source: safety, write: false}
+  - id: unavailable_config_blocks_writer
+    mode: EVOpt optimiert
+    input: {config_ok: false, current_charge_limit_w: 5000}
+    expect: {target_w: 5000, source: safety, write: false}
+  - id: site_not_confirmed_blocks_writer
+    mode: Eigenverbrauch maximieren
+    input: {site_confirmed: false, current_charge_limit_w: 0}
+    expect: {target_w: 0, source: safety, write: false}
+  - id: same_value_no_write
+    mode: Eigenverbrauch maximieren
+    input: {current_charge_limit_w: 5000, candidate_stable_s: 120}
+    expect: {target_w: 5000, source: self_consumption, write: false}

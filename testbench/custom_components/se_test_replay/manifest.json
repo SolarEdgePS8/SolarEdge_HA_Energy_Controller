@@ -1,0 +1,8 @@
+{
+  "domain": "se_test_replay",
+  "name": "SolarEdge Controller 24h Test Replay",
+  "version": "0.1.0",
+  "documentation": "https://github.com/SolarEdgePS8/SolarEdge_HA_Energy_Controller",
+  "codeowners": [],
+  "iot_class": "local_push"
+}

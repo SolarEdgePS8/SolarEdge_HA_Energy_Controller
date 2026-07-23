@@ -214,7 +214,20 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 - [Funktion der YAML-Dateien](docs/reference/01_YAML_FILES.md)
 - [Safety, Arbiter und Writer](docs/reference/02_SAFETY_ARBITER_WRITERS.md)
 - [Tests und Release-Gates](docs/reference/03_TESTS_AND_RELEASE_GATES.md)
+- [Deep Testbench, Codespaces und HA-Container-Simulation](docs/13_DEEP_TESTBENCH.md)
 - [Technischer Status RC4](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
+
+
+## Tiefgreifende Testumgebung
+
+Das Repository enthält zusätzlich einen hardwarefreien Deep Testbench mit festen Tag-/Nacht-/PV-/SoC-Szenarien, Property-Tests, Fake-Time-Zustandsmaschinen, einem kontrollierbaren Fake-evcc-Server und einem gepinnten Home-Assistant-Container-Smoke-Test. Codespaces und GitHub Actions verwenden dieselben Einstiegsskripte.
+
+```bash
+bash scripts/run_deep_tests.sh all
+bash scripts/run_ha_smoke.sh
+```
+
+Details: [Deep Testbench und GitHub Codespaces](docs/13_DEEP_TESTBENCH.md).
 
 ## Sicherheit
 

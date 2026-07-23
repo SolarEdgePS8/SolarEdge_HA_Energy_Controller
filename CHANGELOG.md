@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Codespaces-Dev-Container mit Python, Docker, ShellCheck, YAML- und GitHub-Actions-Unterstützung ergänzt;
+- unabhängiges Python-Referenzmodell für Safety, alle vier Modi, EVOpt-Handover und Writer-Policy ergänzt;
+- 29 feste synthetische Tag-/Nacht-/PV-/SoC-/Forecast-Szenarien sowie Hypothesis-, Grenzwert- und Fake-Time-Tests ergänzt;
+- kontrollierbarer Fake-evcc-Server und Home-Assistant-2026.7.3-Container-Smoke-Test ergänzt;
+- mehrstufiger GitHub-Actions-Workflow mit getrennten Artefakten und abschließendem Deep-Release-Gate ergänzt;
+- keine Verbindung zu realer Hardware und keine Änderung an den 18 produktiven Package-YAMLs.
 - Installer-Backups werden mit einem eindeutigen `mktemp`-Suffix erzeugt; mehrere Installations- oder Rollbacktests innerhalb derselben Sekunde können sich nicht mehr gegenseitig überschreiben;
 - CI erzwingt denselben Zeitstempel für mehrere Installationsläufe und prüft die Kollisionssicherheit deterministisch;
 - GitHub Actions auf Node-24-fähige Versionen aktualisiert: `checkout@v6`, `setup-python@v6` und `upload-artifact@v6`;

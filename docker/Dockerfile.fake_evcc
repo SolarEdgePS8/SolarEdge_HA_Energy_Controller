@@ -1,0 +1,5 @@
+FROM python:3.13-slim
+WORKDIR /app
+COPY testbench /app/testbench
+EXPOSE 7070
+CMD ["python", "-m", "testbench.fake_evcc.app", "--host", "0.0.0.0", "--port", "7070"]

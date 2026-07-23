@@ -13,3 +13,9 @@ config/private_migration_values.env
 *.db
 *.db-shm
 *.db-wal
+artifacts/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+.testbench/

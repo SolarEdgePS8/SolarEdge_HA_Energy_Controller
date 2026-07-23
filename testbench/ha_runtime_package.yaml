@@ -1,0 +1,255 @@
+# Test-only Home Assistant package. Never installed by the public installer.
+input_number:
+  se_testbench_charge_limit_backing:
+    name: SE Testbench Charge Limit Backing
+    min: 0
+    max: 5000
+    step: 1
+    initial: 0
+    unit_of_measurement: W
+  se_testbench_battery_soc:
+    name: SE Testbench Battery SoC
+    min: 0
+    max: 100
+    step: 0.1
+    initial: 50
+    unit_of_measurement: "%"
+  se_testbench_battery_capacity:
+    name: SE Testbench Battery Capacity
+    min: 1
+    max: 50
+    step: 0.1
+    initial: 24.25
+    unit_of_measurement: kWh
+  se_testbench_pv_power:
+    name: SE Testbench PV Power
+    min: 0
+    max: 30000
+    step: 1
+    initial: 5000
+    unit_of_measurement: W
+  se_testbench_home_power:
+    name: SE Testbench Home Power
+    min: 0
+    max: 30000
+    step: 1
+    initial: 800
+    unit_of_measurement: W
+  se_testbench_pv_today_remaining:
+    name: SE Testbench PV Today Remaining
+    min: 0
+    max: 100
+    step: 0.1
+    initial: 15
+    unit_of_measurement: kWh
+  se_testbench_pv_today_total:
+    name: SE Testbench PV Today Total
+    min: 0
+    max: 100
+    step: 0.1
+    initial: 22
+    unit_of_measurement: kWh
+  se_testbench_pv_tomorrow:
+    name: SE Testbench PV Tomorrow
+    min: 0
+    max: 100
+    step: 0.1
+    initial: 18
+    unit_of_measurement: kWh
+
+template:
+  - number:
+      - name: Test Storage Charge Limit
+        unique_id: se_testbench_storage_charge_limit
+        unit_of_measurement: W
+        device_class: power
+        min: 0
+        max: 5000
+        step: 1
+        state: "{{ states('input_number.se_testbench_charge_limit_backing') }}"
+        set_value:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.se_testbench_charge_limit_backing
+            data:
+              value: "{{ value }}"
+  - sensor:
+      - name: Test Battery SoC
+        unique_id: se_testbench_battery_soc
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_battery_soc') }}"
+      - name: Test Battery Capacity
+        unique_id: se_testbench_battery_capacity
+        unit_of_measurement: kWh
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_battery_capacity') }}"
+      - name: Test PV Power
+        unique_id: se_testbench_pv_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_pv_power') }}"
+      - name: Test Home Power
+        unique_id: se_testbench_home_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_home_power') }}"
+      - name: Test PV Today Remaining
+        unique_id: se_testbench_pv_today_remaining
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_pv_today_remaining') }}"
+      - name: Test PV Today Total
+        unique_id: se_testbench_pv_today_total
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_pv_today_total') }}"
+      - name: Test PV Tomorrow
+        unique_id: se_testbench_pv_tomorrow
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: measurement
+        state: "{{ states('input_number.se_testbench_pv_tomorrow') }}"
+
+automation:
+  - id: se_controller_deep_runtime_mode_switch_suite
+    alias: SE Controller Deep Runtime Mode Switch Suite
+    mode: single
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - delay: "00:00:08"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.se_netzdienlich_enabled
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_charge_limit_entity
+        data:
+          value: number.test_storage_charge_limit
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_battery_soe_entity
+        data:
+          value: sensor.test_battery_soc
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_battery_capacity_entity
+        data:
+          value: sensor.test_battery_capacity
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_pv_today_remaining_entity
+        data:
+          value: sensor.test_pv_today_remaining
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_pv_today_total_entity
+        data:
+          value: sensor.test_pv_today_total
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_pv_tomorrow_entity
+        data:
+          value: sensor.test_pv_tomorrow
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_live_pv_power_entities
+        data:
+          value: sensor.test_pv_power
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.se_nf_live_consumption_power_entities
+        data:
+          value: sensor.test_home_power
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.se_nf_battery_capacity_kwh_fallback
+        data:
+          value: 24.25
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.se_nf_closed_charge_limit_w
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.se_nf_open_charge_limit_w
+        data:
+          value: 5000
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.se_nf_site_config_confirmed
+      - delay: "00:00:10"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.se_netzdienlich_enabled
+
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.se_nf_optimization_mode
+        data:
+          option: Eigenverbrauch maximieren
+      - delay: "00:00:03"
+      - action: system_log.write
+        data:
+          level: warning
+          logger: se_controller_testbench
+          message: >-
+            SE_TESTBENCH_MODE|selected={{ states('input_select.se_nf_optimization_mode') }}|effective={{ states('sensor.se_nf_optimization_mode_effective') }}|control={{ states('sensor.se_nf_active_control_label') }}|target={{ states('sensor.se_nf_desired_target') }}|actual={{ states('number.test_storage_charge_limit') }}
+
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.se_nf_optimization_mode
+        data:
+          option: Netzdienlich laden
+      - delay: "00:00:03"
+      - action: system_log.write
+        data:
+          level: warning
+          logger: se_controller_testbench
+          message: >-
+            SE_TESTBENCH_MODE|selected={{ states('input_select.se_nf_optimization_mode') }}|effective={{ states('sensor.se_nf_optimization_mode_effective') }}|control={{ states('sensor.se_nf_active_control_label') }}|target={{ states('sensor.se_nf_desired_target') }}|actual={{ states('number.test_storage_charge_limit') }}
+
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.se_nf_optimization_mode
+        data:
+          option: Akku schonen
+      - delay: "00:00:03"
+      - action: system_log.write
+        data:
+          level: warning
+          logger: se_controller_testbench
+          message: >-
+            SE_TESTBENCH_MODE|selected={{ states('input_select.se_nf_optimization_mode') }}|effective={{ states('sensor.se_nf_optimization_mode_effective') }}|control={{ states('sensor.se_nf_active_control_label') }}|target={{ states('sensor.se_nf_desired_target') }}|actual={{ states('number.test_storage_charge_limit') }}
+
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.se_nf_optimization_mode
+        data:
+          option: EVOpt optimiert
+      - delay: "00:00:03"
+      - action: system_log.write
+        data:
+          level: warning
+          logger: se_controller_testbench
+          message: >-
+            SE_TESTBENCH_MODE|selected={{ states('input_select.se_nf_optimization_mode') }}|effective={{ states('sensor.se_nf_optimization_mode_effective') }}|control={{ states('sensor.se_nf_active_control_label') }}|target={{ states('sensor.se_nf_desired_target') }}|actual={{ states('number.test_storage_charge_limit') }}
+
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.se_netzdienlich_enabled
+      - delay: "00:00:01"
+      - action: system_log.write
+        data:
+          level: warning
+          logger: se_controller_testbench
+          message: >-
+            SE_TESTBENCH_DONE|config={{ states('sensor.se_nf_config_check') }}|sanity={{ states('sensor.se_nf_sanity_check') }}|master={{ states('input_boolean.se_netzdienlich_enabled') }}|actual={{ states('number.test_storage_charge_limit') }}

@@ -1,0 +1,225 @@
+name: Deep SolarEdge Controller Testbench
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-testbench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codespaces-devcontainer:
+    name: codespaces-devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install the reference Dev Container CLI
+        run: npm install --global @devcontainers/cli@0.82.0
+      - name: Build and start the Codespaces-compatible dev container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/codespaces
+          devcontainer up --workspace-folder . --log-level info \
+            2>&1 | tee artifacts/codespaces/up.log
+      - name: Run Codespaces setup and tests inside the dev container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          devcontainer exec --workspace-folder . \
+            bash .devcontainer/post-create.sh \
+            2>&1 | tee artifacts/codespaces/post-create.log
+          devcontainer exec --workspace-folder . \
+            bash scripts/run_deep_tests.sh all \
+            2>&1 | tee artifacts/codespaces/test.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: codespaces-devcontainer-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 30
+
+  static:
+    name: static-architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Static, privacy and architecture contracts
+        run: bash scripts/run_deep_tests.sh static
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: deep-static-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 30
+
+  model:
+    name: model-matrix-property-state
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Fixed scenarios, property tests, fake-time and measured-day replay
+        run: bash scripts/run_deep_tests.sh model
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: deep-model-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 30
+
+  fake-evcc:
+    name: fake-evcc-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Exercise controllable evcc API fixtures
+        run: bash scripts/run_deep_tests.sh fake-evcc
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: fake-evcc-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 30
+
+  home-assistant-smoke:
+    name: home-assistant-2026.7.3-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate and start the installed package in Home Assistant
+        env:
+          HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
+          HA_START_TIMEOUT: "180"
+        run: bash scripts/run_ha_smoke.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: home-assistant-smoke-${{ github.sha }}
+          path: artifacts/ha-smoke
+          if-no-files-found: warn
+          retention-days: 30
+
+  real-day-24h:
+    name: main-production-real-day-24h
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Prove production controller parity with main
+        run: |
+          set -Eeuo pipefail
+          git fetch origin main --depth=1
+          git diff --exit-code origin/main...HEAD -- \
+            package \
+            custom_components/se_write_watchdog \
+            scripts/install_package.sh \
+            scripts/runtime \
+            audit/runtime
+      - name: Replay one measured day through all four modes in Home Assistant
+        env:
+          HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
+          HA_START_TIMEOUT: "180"
+          HA_24H_REPLAY_TIMEOUT: "480"
+        run: bash scripts/run_ha_24h_replay.sh
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: real-day-24h-${{ github.sha }}
+          path: artifacts/ha-24h
+          if-no-files-found: error
+          retention-days: 30
+
+  release-installation:
+    name: release-installer-rollback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Build and validate actual release bundle
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release
+          bash scripts/build_release.sh artifacts/release 0.1.0-rc.4
+          ZIP="artifacts/release/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip"
+          SHA="${ZIP}.sha256"
+          (cd artifacts/release && sha256sum -c "$(basename "$SHA")")
+          unzip -t "$ZIP"
+          mkdir artifacts/extracted
+          unzip -q "$ZIP" -d artifacts/extracted
+          python artifacts/extracted/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py \
+            artifacts/extracted/SolarEdge_HA_Energy_Controller
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: tested-release-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+  deep-gate:
+    name: deep-release-gate
+    if: always()
+    needs:
+      - codespaces-devcontainer
+      - static
+      - model
+      - fake-evcc
+      - home-assistant-smoke
+      - real-day-24h
+      - release-installation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all deep test stages
+        env:
+          CODESPACES: ${{ needs.codespaces-devcontainer.result }}
+          STATIC: ${{ needs.static.result }}
+          MODEL: ${{ needs.model.result }}
+          EVCC: ${{ needs.fake-evcc.result }}
+          HA: ${{ needs.home-assistant-smoke.result }}
+          REAL_DAY: ${{ needs.real-day-24h.result }}
+          RELEASE: ${{ needs.release-installation.result }}
+        run: |
+          set -Eeuo pipefail
+          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nreal_day=%s\nrelease=%s\n' \
+            "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$REAL_DAY" "$RELEASE"
+          test "$CODESPACES" = success
+          test "$STATIC" = success
+          test "$MODEL" = success
+          test "$EVCC" = success
+          test "$HA" = success
+          test "$REAL_DAY" = success
+          test "$RELEASE" = success
