@@ -70,6 +70,8 @@ Tagesprotokolle werden standardmäßig 14 Tage aufbewahrt.
 /config/se_write_watchdog_tools/report.sh 300
 ```
 
+Der Zahlenwert legt fest, wie viele der neuesten Ereignisse in den Bericht einfließen.
+
 ## Live-Trace
 
 ```bash
@@ -78,9 +80,7 @@ Tagesprotokolle werden standardmäßig 14 Tage aufbewahrt.
 
 Abbruch mit `Strg+C`.
 
-## Erwartung
-
-Im normalen Betrieb:
+## Erwartung im normalen Betrieb
 
 ```text
 possible_writers = 1
@@ -95,9 +95,11 @@ Die Zahl der Write-Aufrufe kann größer sein als die Zahl der Zustandswechsel, 
 
 ## EVOpt-Prüfung
 
-Bei `holdcharge` und aktiver EVOpt-Steuerung:
+Bei `holdcharge` und aktiver EVOpt-Steuerung wird erwartet:
 
 ```text
+sensor.se_nf_evopt_action_raw = holdcharge
+sensor.se_nf_evopt_action_stable = holdcharge
 binary_sensor.se_nf_evopt_active_control = on
 binary_sensor.se_nf_evopt_charge_block_request = on
 sensor.se_nf_desired_target = 0
@@ -105,14 +107,48 @@ number.solaredge_i1_storage_charge_limit = 0
 sensor.se_write_watchdog_status = ok
 ```
 
-Die rohe Aktion `holdcharge` allein reicht nicht für einen Alarm. Während Warm-up oder Legacy-Fallback ist sie nur informativ. Verbindlich wird sie erst bei aktiver EVOpt-Steuerung oder gelatchtem Block.
+### Allgemeiner Mismatch-Alarm
+
+Die rohe Aktion `holdcharge` allein reicht während reinem Warm-up nicht automatisch für einen allgemeinen Mismatch-Alarm. Für diese Bewertung wird sie verbindlich, wenn EVOpt aktiv steuert oder der Charge-Block gelatcht ist. Dadurch werden noch nicht vollständig initialisierte Diagnosewerte nicht vorschnell als Fehler gewertet.
+
+### Konkreter Writer-Intent
+
+Bei einem tatsächlichen geplanten `5000-W`-Write gilt eine strengere Regel. Im Modus `EVOpt optimiert` ist jede dieser Kombinationen immer kritisch:
+
+```text
+requested_value = 5000 und raw = holdcharge
+requested_value = 5000 und stable = holdcharge
+requested_value = 5000 und block = on
+```
+
+Auch `config_check != ok`, `sanity_check != ok` oder ein anderer Emergency-/Fail-open-Grund machen diese Kombination nicht zulässig.
+
+Der korrigierte Writer soll einen solchen Intent bereits vor dem `number.set_value`-Aufruf verhindern. Taucht die Kombination trotzdem in einem neuen Protokoll auf, ist die laufende Installation nicht auf dem korrigierten Stand oder es liegt ein neuer Fehler vor.
+
+## So liest man einen Write-Intent
+
+Beispiel eines problematischen alten Ereignisses:
+
+```text
+Wert=5000 raw=holdcharge stable=holdcharge block=on target_stable_s=90
+```
+
+Einfache Bedeutung:
+
+- `Wert=5000`: Laden sollte freigegeben werden;
+- `raw=holdcharge`: EVOpt verlangte unmittelbar eine Ladesperre;
+- `stable=holdcharge`: auch die stabilisierte Aktion verlangte eine Ladesperre;
+- `block=on`: der Charge-Block war aktiv;
+- Ergebnis: Der permissive Write war falsch.
+
+Ein anschließend auftretendes `Wert=0` korrigiert zwar den Zustand, macht den vorherigen falschen Write aber nicht unkritisch. Es handelt sich dann um einen unerwünschten Roundtrip.
 
 ## Writer-Scan
 
 Der statische Scan sucht nach `number.set_value` zusammen mit dem exakten Ziel oder dem Mapping-Helper. Erwartet wird genau:
 
 ```text
-packages/se_controller_80_charge_writer.yaml
+package/se_controller_80_charge_writer.yaml
 ```
 
 Ein weiterer Treffer muss vor Aktivierung geklärt werden.
