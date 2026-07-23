@@ -76,14 +76,27 @@ automation:
             {{ not is_state('input_boolean.se_netzdienlich_enabled','on')
                or not is_state('sensor.se_nf_config_check','ok')
                or not is_state('sensor.se_nf_sanity_check','ok') }}
+          evopt_restrictive_active: >-
+            {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
+            {{ selected == 'EVOpt optimiert'
+               and (
+                 states('sensor.se_nf_evopt_action_raw') == 'holdcharge'
+                 or states('sensor.se_nf_evopt_action_stable') == 'holdcharge'
+                 or is_state('binary_sensor.se_nf_evopt_charge_block_request','on')
+               ) }}
           evopt_release_ready: >-
             {% set selected = states('sensor.se_nf_optimization_mode_effective') %}
             {% set raw = states('sensor.se_nf_evopt_action_raw') %}
             {{ selected != 'EVOpt optimiert'
-               or emergency_open
-               or (raw != 'holdcharge' and evopt_action_stable_s | int(0) >= 1200) }}
+               or (
+                 not evopt_restrictive_active
+                 and (
+                   emergency_open
+                   or (raw != 'holdcharge' and evopt_action_stable_s | int(0) >= 1200)
+                 )
+               ) }}
           permissive_open_stable: >-
-            {{ emergency_open
+            {{ (emergency_open and not evopt_restrictive_active)
                or (target_value_stable_s | int(0) >= 90 and evopt_release_ready) }}
           target_open_allowed: >-
             {{ target_open_plausible
@@ -130,6 +143,7 @@ automation:
                 priority_open={{ priority_open_write }},
                 target_stable_s={{ target_value_stable_s }},
                 evopt_action_stable_s={{ evopt_action_stable_s }},
+                evopt_restrictive_active={{ evopt_restrictive_active }},
                 evopt_release_ready={{ evopt_release_ready }},
                 emergency_open={{ emergency_open }},
                 cooldown_ok={{ cooldown_ok }}, lock_active={{ lock_active }},
@@ -172,6 +186,7 @@ automation:
           lock_active: "{{ lock_active }}"
           target_stable_s: "{{ target_value_stable_s }}"
           evopt_action_stable_s: "{{ evopt_action_stable_s }}"
+          evopt_restrictive_active: "{{ evopt_restrictive_active }}"
           evopt_release_ready: "{{ evopt_release_ready }}"
       - service: number.set_value
         data:

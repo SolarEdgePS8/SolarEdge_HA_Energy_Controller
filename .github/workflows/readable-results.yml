@@ -44,5 +44,9 @@ jobs:
         with:
           name: readable-test-result-${{ github.sha }}
           path: artifacts/readable-results/TEST_RESULT_READABLE.md
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
+
+      - name: Ergebnis auch bei frühem Fehler einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage quick --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

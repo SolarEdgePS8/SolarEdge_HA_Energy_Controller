@@ -8,7 +8,44 @@ mkdir -p "$ARTIFACTS"
 cd "$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
+explain_group() {
+  case "$1" in
+    static)
+      cat <<'EOF'
+
+=== EINFACHE ERKLÄRUNG: DATEI- UND ARCHITEKTURTEST ===
+Dieser Test prüft, ob YAML, Python, Shell-Skripte, Datenschutzregeln und die
+Single-Writer-Architektur grundsätzlich korrekt aufgebaut sind.
+GRÜN bedeutet: Die Dateien sind lesbar und die Sicherheitsverträge passen.
+ROT bedeutet: Eine konkrete Datei oder Regel ist fehlerhaft; der Release bleibt gesperrt.
+EOF
+      ;;
+    model)
+      cat <<'EOF'
+
+=== EINFACHE ERKLÄRUNG: STEUERUNGS- UND GRENZFALLTEST ===
+Dieser Test rechnet viele normale und absichtlich problematische Situationen durch.
+Dazu gehört jetzt ausdrücklich der echte Fehler vom 23.07.2026:
+EVOpt meldet holdcharge, der Charge-Block ist an, gleichzeitig versucht Fail-open 5000 W.
+GRÜN bedeutet: Kein solcher permissiver Schreibzugriff ist möglich.
+ROT bedeutet: Die Steuerlogik könnte den SolarEdge-Wert falsch öffnen.
+EOF
+      ;;
+    fake-evcc)
+      cat <<'EOF'
+
+=== EINFACHE ERKLÄRUNG: EVCC-/EVOPT-SCHNITTSTELLENTEST ===
+Dieser Test ersetzt evcc durch einen kontrollierten Testserver und liefert normale,
+fehlerhafte und unvollständige Antworten.
+GRÜN bedeutet: Der Controller reagiert auf diese Antworten wie vorgesehen.
+ROT bedeutet: Eine evcc-Antwort kann zu einer falschen Steuerentscheidung führen.
+EOF
+      ;;
+  esac
+}
+
 run_static() {
+  explain_group static
   python audit/readonly_audit.py . --release-gate \
     | tee "$ARTIFACTS/readonly_audit.txt"
   python -m compileall -q audit scripts tests testbench custom_components
@@ -38,6 +75,7 @@ run_static() {
 }
 
 run_model() {
+  explain_group model
   python -m testbench.run_scenarios \
     --output "$ARTIFACTS/scenario_report.json"
   python -m testbench.day_replay \
@@ -53,6 +91,8 @@ run_model() {
     tests/deep/test_state_machine.py \
     tests/deep/test_real_day_24h.py \
     tests/deep/test_fixture_contracts.py \
+    tests/deep/test_writer_policy.py \
+    tests/deep/test_writer_template_regression.py \
     --junitxml="$ARTIFACTS/model-junit.xml" \
     --cov=testbench.reference \
     --cov-report=term-missing \
@@ -63,6 +103,7 @@ run_model() {
 }
 
 run_fake_evcc() {
+  explain_group fake-evcc
   python -m pytest -q tests/deep/test_fake_evcc.py \
     --junitxml="$ARTIFACTS/fake-evcc-junit.xml" \
     -p no:cacheprovider

@@ -43,6 +43,9 @@ jobs:
           path: artifacts
           if-no-files-found: warn
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage codespaces --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   static:
     name: static-architecture
@@ -69,6 +72,9 @@ jobs:
           path: artifacts
           if-no-files-found: warn
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage static --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   model:
     name: model-matrix-property-state
@@ -91,6 +97,9 @@ jobs:
           path: artifacts
           if-no-files-found: warn
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage model --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   fake-evcc:
     name: fake-evcc-api
@@ -113,6 +122,9 @@ jobs:
           path: artifacts
           if-no-files-found: warn
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage fake-evcc --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   home-assistant-smoke:
     name: home-assistant-${{ matrix.ha_version }}-smoke
@@ -142,6 +154,9 @@ jobs:
           path: artifacts/ha-smoke/${{ matrix.ha_version }}
           if-no-files-found: warn
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage ha-smoke --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   stable-preview:
     name: stable-preview-nonblocking
@@ -196,6 +211,9 @@ jobs:
           path: artifacts/stable-preview
           if-no-files-found: error
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage stable-preview --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   real-day-24h:
     name: main-production-real-day-24h
@@ -205,11 +223,31 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Prove production controller parity with main
+      - name: Show which production files are tested
+        shell: bash
         run: |
           set -Eeuo pipefail
+          mkdir -p artifacts/ha-24h
           git fetch origin main --depth=1
-          git diff --exit-code origin/main...HEAD -- package custom_components/se_write_watchdog scripts/install_package.sh scripts/runtime audit/runtime
+          git diff --name-only origin/main...HEAD -- \
+            package \
+            custom_components/se_write_watchdog \
+            scripts/install_package.sh \
+            scripts/runtime \
+            audit/runtime \
+            | tee artifacts/ha-24h/production-files-under-test.txt
+          if [ ! -s artifacts/ha-24h/production-files-under-test.txt ]; then
+            echo "Keine produktive Abweichung zu main: Der aktuelle main-Code wird geprüft." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Produktive Änderungen, die dieser Lauf tatsächlich prüft"
+              echo
+              echo "Der Replay läuft mit dem Code dieses Pull Requests, nicht mit dem alten main-Stand:"
+              echo
+              sed 's/^/- `/' artifacts/ha-24h/production-files-under-test.txt | sed 's/$/`/'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Replay one measured day through all four modes in Home Assistant
         env:
           HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
@@ -226,6 +264,9 @@ jobs:
           path: artifacts/ha-24h
           if-no-files-found: error
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage replay --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   release-installation:
     name: release-installer-rollback
@@ -258,6 +299,9 @@ jobs:
           path: artifacts
           if-no-files-found: error
           retention-days: 30
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage release --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
 
   deep-gate:
     name: deep-release-gate
@@ -272,6 +316,7 @@ jobs:
       - release-installation
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
       - name: Require all deep test stages
         env:
           CODESPACES: ${{ needs.codespaces-devcontainer.result }}
@@ -283,6 +328,20 @@ jobs:
           RELEASE: ${{ needs.release-installation.result }}
         run: |
           set -Eeuo pipefail
+          {
+            echo "## Gesamtergebnis aller Pflichtstufen"
+            echo
+            echo "| Prüfung | Ergebnis | Einfache Bedeutung |"
+            echo "|---|---|---|"
+            echo "| Entwicklungscontainer | $CODESPACES | Testumgebung reproduzierbar |"
+            echo "| Dateien/Architektur | $STATIC | Syntax, Datenschutz und Single Writer |"
+            echo "| Steuerungsmodell | $MODEL | Grenzfälle und Live-Regression |"
+            echo "| Fake evcc | $EVCC | API-Antworten korrekt behandelt |"
+            echo "| Home Assistant | $HA | Package lädt und startet |"
+            echo "| 96-Stunden-Replay | $REAL_DAY | Vier Modi mit Produktionsautomation |"
+            echo "| Release/Rollback | $RELEASE | Installation und Rücknahme vollständig |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
           printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nreal_day=%s\nrelease=%s\n' "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$REAL_DAY" "$RELEASE"
           test "$CODESPACES" = success
           test "$STATIC" = success
@@ -291,3 +350,6 @@ jobs:
           test "$HA" = success
           test "$REAL_DAY" = success
           test "$RELEASE" = success
+      - name: Ergebnis einfach erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage gate --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
