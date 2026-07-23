@@ -39,7 +39,7 @@ Auswertung des Write-Watchdogs nach dem Patch:
 POST_FIX_WRITE_CALLS=0
 ```
 
-Der Bericht wurde mehrfach für denselben Zeitraum wiederholt. Seit Beginn des Tests wurde kein echter `number.set_value`-Aufruf auf das SolarEdge-Charge-Limit registriert.
+Der Bericht wurde mehrfach für denselben Zeitraum wiederholt. Seit Beginn des Tests wurde kein echter `number.set_value`-Aufruf auf das SolarEdge-Charge-Limit registriert. Der produktive GitHub-Stand übernimmt exakt denselben lokal geprüften Zeitwert.
 
 ## Sicherheitswirkung
 
