@@ -51,13 +51,34 @@ Die Verarbeitungskette bleibt:
 evcc Optimizer → read-only Adapter → EVOpt-Modus → Safety → Arbiter → Writer
 ```
 
-Erst Safety und Arbiter entscheiden, ob daraus eine gültige Controller-Anforderung entsteht.
+Safety und Arbiter erzeugen die Controller-Anforderung. Der einzige Writer prüft unmittelbar vor dem SolarEdge-Aufruf zusätzlich seine schreibrelevanten Sicherheitsbedingungen.
 
-## Slotwechsel in RC3
+## Letzte Sicherheitsregel vor dem SolarEdge-Write
+
+Im Modus `EVOpt optimiert` darf kein `5000-W`-Write erfolgen, solange mindestens eines dieser Signale restriktiv ist:
+
+```text
+sensor.se_nf_evopt_action_raw = holdcharge
+sensor.se_nf_evopt_action_stable = holdcharge
+binary_sensor.se_nf_evopt_charge_block_request = on
+```
+
+Diese Regel gilt auch bei einem gleichzeitigen Config-/Sanity-/Emergency-Fail-open.
+
+Eine normale EVOpt-Freigabe benötigt:
+
+```text
+EVOpt-Rohaktion mindestens 20 Minuten nicht-restriktiv
+UND finaler Sollwert mindestens 90 Sekunden stabil permissiv
+```
+
+Ein Wechsel auf `0 W` bleibt sofort möglich.
+
+## Slotwechsel
 
 Der evcc Optimizer arbeitet typischerweise mit 15-Minuten-Slots. Direkt nach einer Neuberechnung kann `battery.devices[].suggestion.action` noch zum ersten Teilslot des letzten Solver-Laufs gehören.
 
-RC3 behandelt deshalb den vollständig validierten aktuellen Slot als maßgeblich, sobald der Plan über den ersten Slot hinausgelaufen ist. Eine veraltete Suggestion darf dann nicht mehr allein den EVOpt-Modus deaktivieren.
+Der vollständig validierte aktuelle Slot wird deshalb maßgeblich, sobald der Plan über den ersten Slot hinausgelaufen ist. Eine veraltete Suggestion darf den EVOpt-Modus nicht allein deaktivieren.
 
 Wichtige Diagnoseattribute am Rohsensor `sensor.se_nf_evopt_adapter_raw`:
 
@@ -86,7 +107,7 @@ Das ist kein Fehler, solange Plan, aktueller Slot und Datenstatus konsistent ble
 
 ## Stabilisierung nach Neustart
 
-Nach einem Home-Assistant-Neustart ist für etwa zwei Minuten möglich:
+Nach einem Home-Assistant-Neustart ist zunächst möglich:
 
 ```text
 sensor.se_nf_evopt_status = warming_up
@@ -103,9 +124,13 @@ binary_sensor.se_nf_evopt_active_control = on
 
 Der Health-Grund ist kein eigener Sensor `sensor.se_nf_evopt_health_reason`. Er steht als Attribut `reason` am Statussensor und als Attribut `health_reason` am Rohsensor.
 
+Auch während Warm-up oder Recovery kann ein noch aktives restriktives EVOpt-Signal nicht durch Fail-open umgangen werden.
+
 ## Fallback
 
-Bei API-Ausfall, altem Plan, fehlender Batterie, widersprüchlichen Slots oder ungültigen Daten wird der EVOpt-Plan verworfen. Der Controller verwendet dann vollständig den Modus „Netzdienlich laden“.
+Bei API-Ausfall, altem Plan, fehlender Batterie, widersprüchlichen Slots oder ungültigen Daten wird der EVOpt-Plan verworfen. Nach 20 Minuten durchgehendem Ausfall übernimmt vollständig der Modus „Netzdienlich laden“.
+
+Der Fallback darf grundsätzlich permissiv werden. Ein noch eindeutig aktives `raw=holdcharge`, `stable=holdcharge` oder `charge_block=on` blockiert jedoch weiterhin einen konkreten `5000-W`-Write.
 
 Diagnose:
 
@@ -116,4 +141,4 @@ sensor.se_nf_evopt_status
 sensor.se_nf_active_control_label
 ```
 
-Ein regulärer Slotwechsel mit gültigem Plan darf in RC3 nicht zu einem unnötigen Fallback führen. `binary_sensor.se_nf_evopt_active_control` muss dabei eingeschaltet bleiben.
+Ein regulärer Slotwechsel mit gültigem Plan darf nicht zu einem unnötigen Fallback führen. `binary_sensor.se_nf_evopt_active_control` muss dabei eingeschaltet bleiben.
