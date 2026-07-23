@@ -1,0 +1,32 @@
+# Local-only allowlist for scripts/export_fixture.py.
+# Replace only the right-hand side with your local CSV columns or HA entity IDs.
+# Do not commit a mapping containing private entity IDs.
+
+source:
+  timestamp_column: timestamp
+
+metadata:
+  name: local_allowlist_export_15m
+  source_date: "2000-01-01"
+  timezone: Europe/Berlin
+  cadence_minutes: 15
+  battery_capacity_kwh: 10.0
+  battery_efficiency: 0.95
+  forecast_scale_observed: 1.0
+  forecast_total_kwh: 20.0
+  evopt_timeline_kind: local_allowlist_export
+  max_balance_residual_w: 20
+
+roles:
+  pv_w: pv_power_w
+  home_w: home_power_w
+  grid_import_w: grid_import_w
+  grid_export_w: grid_export_w
+  battery_charge_w: battery_charge_w
+  battery_discharge_w: battery_discharge_w
+  soc_pct: battery_soc_pct
+  pv_forecast_total_kwh: pv_forecast_total_kwh
+  pv_forecast_remaining_kwh: pv_forecast_remaining_kwh
+  pv_forecast_tomorrow_kwh: pv_forecast_tomorrow_kwh
+  evopt_action: evopt_action
+  evopt_healthy: evopt_healthy
