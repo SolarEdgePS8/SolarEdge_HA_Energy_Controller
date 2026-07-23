@@ -152,9 +152,9 @@ if [ "$replay_done" -ne 1 ]; then
   exit 1
 fi
 
-fatal_pattern='Invalid config|Config validation failed|Error during setup of component se_test_replay|Setup failed for.*se_test_replay'
+fatal_pattern='Invalid config|Config validation failed|Error during setup of component se_test_replay|Setup failed for.*se_test_replay|Detected blocking call.*se_test_replay'
 if grep -E "$fatal_pattern" "$ARTIFACTS/home-assistant.log"; then
-  echo "Fatal Home Assistant replay setup error found" >&2
+  echo "Fatal Home Assistant replay setup or event-loop error found" >&2
   exit 1
 fi
 
