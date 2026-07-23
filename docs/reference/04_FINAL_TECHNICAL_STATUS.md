@@ -22,47 +22,75 @@ Auf der Referenzinstallation wurde ein echter Zyklus beobachtet:
 0 W → 5000 W → 0 W
 ```
 
-Beide Befehle kamen vom einzigen zentralen Charge-Limit-Writer. Während EVOpt startete, übernahm der Legacy-Fallback zu früh. Nach EVOpt-Übernahme mit `holdcharge` wurde wieder geschlossen. Es gab keinen konkurrierenden Writer.
+Beide Befehle kamen vom einzigen zentralen Charge-Limit-Writer. Ein konkurrierender Writer wurde nicht gefunden.
 
-## RC4-Lösung
+Der erste Schutz verzögerte eine normale EVOpt-Freigabe zwar auf 20 Minuten, ließ aber einen Emergency-/Fail-open-Pfad weiterhin permissiv öffnen. Der spätere Live-Nachweis zeigte deshalb trotz eindeutig restriktiver EVOpt-Signale:
 
-- restriktiv sofort, permissiv verzögert;
-- `holdcharge`-Latch 180 Sekunden;
-- Öffnung nach 90 Sekunden stabilem finalem Sollwert;
+```text
+Wert=5000 raw=holdcharge stable=holdcharge block=on target_stable_s=90
+Wert=0    raw=holdcharge stable=holdcharge block=on target_stable_s=0
+```
+
+Damit war die erste Abnahme widerlegt.
+
+## Korrigierte RC4-Lösung ab Commit `205c5e8`
+
+- `0 W` bleibt sofort zulässig;
+- bei aktivem Modus `EVOpt optimiert` bilden `raw=holdcharge`, `stable=holdcharge` und `charge_block=on` gemeinsam einen harten Writer-Block;
+- ein aktiver restriktiver EVOpt-Zustand kann nicht mehr durch Emergency-/Fail-open umgangen werden;
+- eine normale EVOpt-Freigabe benötigt mindestens 20 Minuten stabile nicht-restriktive Rohaktion;
+- zusätzlich muss der finale Zielwert mindestens 90 Sekunden stabil permissiv sein;
+- der vorgelagerte 180-Sekunden-Charge-Block bleibt als Entprellung erhalten, ist aber nicht die alleinige Freigabebedingung;
 - aktueller SolarEdge-Zustand wird während kurzer EVOpt-Ausfälle gehalten;
-- permissiver Legacy-Fallback erst nach 20 Minuten;
+- vollständiger Legacy-Fallback erst nach 20 Minuten;
 - persistente Restart-Helper;
-- Watchdog mit Context- und Intent-Korrelation;
-- Fehlalarmvermeidung für rohe `holdcharge`-Daten während Warm-up/Fallback.
+- Watchdog mit Context- und Intent-Korrelation.
+
+## GitHub-Abnahme
+
+Der korrigierte Writer wurde nicht nur statisch geprüft. Die geänderte produktive Datei `package/se_controller_80_charge_writer.yaml` lief selbst durch den vollständigen Testbench:
+
+```text
+4 Betriebsarten
+96 simulierte Stunden
+384 Entscheidungen
+3 notwendige Writer-Aufrufe
+0 nicht erlaubte Writer
+0 harte Steuerungsfehler
+0 unerwünschte 0↔5000-W-Roundtrips
+Controller-Master am Ende: off
+```
+
+Zusätzlich bestanden:
+
+- direkte Auswertung der produktiven Jinja-Ausdrücke mit dem echten Live-Fehlerzustand;
+- unabhängiges Writer-Sicherheitsmodell;
+- Codespaces/Dev Container;
+- Home Assistant 2026.6.3 und 2026.7.3;
+- aktuelle Stable-Vorschau;
+- Release-, Installer- und Rollbackprüfung.
 
 ## Referenzinstallation
 
+Der neue Stand ist erst nach Installation auf der Referenzanlage live abgenommen. Erwartet sind im EVOpt-Holdcharge-Zustand:
+
 ```text
-STATIC_CHECKS=19_OK_0_ERRORS
 EVOPT_STATUS=healthy
 EVOPT_ACTION_RAW=holdcharge
 EVOPT_ACTION_STABLE=holdcharge
 EVOPT_ACTIVE_CONTROL=on
 EVOPT_CHARGE_BLOCK=on
-EVOPT_FALLBACK=off
-CANDIDATE_SOURCE=evopt
 DESIRED_TARGET=0
 SOLAREDGE_CHARGE_LIMIT=0
-WATCHDOG_STATUS=ok
 ```
 
-Seit dem Neustart nach Installation des Startup-Handover-Fixes:
-
-```text
-write_intent=0
-number_set_value_call=0
-charge_limit_state_change=0
-evopt_mismatch=0
-```
+Ein Write-Intent auf `5000 W` bei `raw=holdcharge`, `stable=holdcharge` oder `charge_block=on` ist immer ein Fehler.
 
 ## Live-/Git-Parität
 
-`validation/live_package_sha256_rc4.json` enthält SHA256 und Größe aller 18 öffentlichen Package-Dateien des geprüften Live-Exports vom 22.07.2026. Das Release-Gate und ein Pytest vergleichen jede Git-Datei damit. Abweichungen blockieren das Release.
+`validation/live_package_sha256_rc4.json` enthält SHA256 und Größe aller 18 öffentlichen Package-Dateien. Das Release-Gate und Pytest vergleichen jede Git-Datei damit. Der Writer-Hash wurde nach der korrigierten Live-Regression aktualisiert.
+
+Die Paritätsprüfung belegt die getestete Git-/Paketversion. Sie ersetzt nicht den anschließenden Langzeittest auf der realen SolarEdge-Anlage.
 
 ## Installer
 
@@ -79,8 +107,10 @@ Das Runtime-Manifest enthält 28 projektverwaltete Dateien:
 
 ## Veröffentlichung
 
-GitHub Actions führt Release-Gate, Python-/Shell-Syntax, Pytest, Installer-/Rollbacksimulation, ZIP-Prüfung und Manifestprüfung aus. Erst der erfolgreiche Workflow auf `main` veröffentlicht automatisch das Prerelease `v0.1.0-rc.4` mit genau dem getesteten ZIP und dessen Prüfsumme.
+GitHub Actions führt Release-Gate, Python-/Shell-Syntax, Pytest, Installer-/Rollbacksimulation, ZIP-Prüfung, Manifestprüfung und den vollständigen Deep Testbench aus.
+
+Ein neues öffentliches Prerelease soll erst veröffentlicht werden, wenn der korrigierte Stand zusätzlich auf der Referenzanlage installiert und über einen ausreichend langen Watchdog-Zeitraum ohne unerwünschten `5000 → 0`-Roundtrip gelaufen ist.
 
 ## Einstufung
 
-Technisch geeignet für ein öffentliches Prerelease `v0.1.0-rc.4`. Noch kein stabiler `v1.0`-Stand, da weitere SolarEdge-Modelle, Integrationsversionen und Fremdinstallationen zusätzliche Praxiserfahrung benötigen.
+Technisch vollständig in GitHub geprüft, aber weiterhin Release Candidate. Noch kein stabiler `v1.0`-Stand, da die reale Langzeitabnahme des korrigierten Writers sowie zusätzliche SolarEdge-Modelle, Integrationsversionen und Fremdinstallationen weitere Praxiserfahrung benötigen.
