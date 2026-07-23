@@ -32,6 +32,7 @@ run_static() {
   python -m pytest -q \
     tests/deep/test_architecture_contracts.py \
     tests/deep/test_fixture_contracts.py \
+    tests/deep/test_ha_24h_patch_contracts.py \
     --junitxml="$ARTIFACTS/static-junit.xml" \
     -p no:cacheprovider
 }
