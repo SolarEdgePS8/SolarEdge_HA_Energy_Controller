@@ -194,12 +194,22 @@ for row in snapshots:
         except (TypeError, ValueError):
             pass
 
-assert 5000.0 in values["Eigenverbrauch maximieren"]["target"], values
-for mode in ("Netzdienlich laden", "Akku schonen", "EVOpt optimiert"):
-    assert 0.0 in values[mode]["target"], (mode, values[mode])
-    assert 5000.0 in values[mode]["target"], (mode, values[mode])
-for mode in report["modes"]:
-    assert len(report["writes"][mode]) >= 1, (mode, report["writes"])
+# A measured day is allowed to remain in one stable target for a mode. The
+# replay proves that every mode evaluated all 96 slots; it must not manufacture
+# writes merely to make every mode toggle.
+assert values["Eigenverbrauch maximieren"]["target"] == {5000.0}, values
+assert values["Netzdienlich laden"]["target"] == {0.0}, values
+assert values["Akku schonen"]["target"] == {0.0}, values
+assert values["EVOpt optimiert"]["target"] == {0.0, 5000.0}, values
+
+# Stable closed modes start with the test target already at 0 W and therefore
+# correctly produce no duplicate number.set_value call. The modes that actually
+# change the target must produce the corresponding production-writer intents.
+assert len(report["writes"]["Eigenverbrauch maximieren"]) == 1, report["writes"]
+assert report["writes"]["Netzdienlich laden"] == [], report["writes"]
+assert report["writes"]["Akku schonen"] == [], report["writes"]
+assert [item["value"] for item in report["writes"]["EVOpt optimiert"]] == [5000.0, 0.0], report["writes"]
+assert report["write_intents"] == 3, report
 
 report["observed_values"] = {
     mode: {key: sorted(vals) for key, vals in item.items()}
