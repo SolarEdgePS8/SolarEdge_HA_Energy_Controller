@@ -200,3 +200,7 @@ jobs:
             dist/SolarEdge_HA_Energy_Controller_v0.1.0-rc.4.zip.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Ergebnis für Nichtentwickler erklären
+        if: always()
+        run: python scripts/render_test_stage_summary.py --stage quick --status "${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
