@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 
@@ -91,6 +92,24 @@ STAGES = {
 }
 
 
+def effective_status(stage_name: str, status: str, root: Path = Path(".")) -> str:
+    """Return the status that a nontechnical reader should actually see."""
+
+    normalized = status.strip().lower()
+    if stage_name != "stable-preview" or normalized != "success":
+        return normalized
+
+    preview_status = root / "artifacts" / "stable-preview" / "status.json"
+    if not preview_status.is_file():
+        return "warning"
+
+    try:
+        payload = json.loads(preview_status.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "warning"
+    return "success" if payload.get("pass") is True else "warning"
+
+
 def render(stage: Stage, status: str) -> str:
     normalized = status.strip().lower()
     passed = normalized == "success"
@@ -138,7 +157,8 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
-    text = render(STAGES[args.stage], args.status)
+    status = effective_status(args.stage, args.status)
+    text = render(STAGES[args.stage], status)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
