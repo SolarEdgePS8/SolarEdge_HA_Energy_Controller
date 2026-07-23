@@ -129,3 +129,5 @@ jobs:
           git add scripts/runtime/se_nf_evopt_shadow_adapter.py
           git commit -m 'Fix: restriktiven EVOpt-Konsens gegen Nachtflattern anwenden'
           git push origin HEAD:fix/evopt-night-flapping
+
+# Trigger the already registered workflow once after creation.
