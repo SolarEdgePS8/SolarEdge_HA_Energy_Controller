@@ -1,0 +1,56 @@
+name: Final repository cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  enforce-main-only:
+    if: github.head_ref == 'maintenance/enforce-main-only-20260723'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every branch except main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t branches < <(
+            gh api --paginate \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GH_REPO}/branches?per_page=100" \
+              --jq '.[].name'
+          )
+
+          echo '## Finaler Branch-Stand' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+
+          for branch in "${branches[@]}"; do
+            if [ "$branch" = main ] || [ "$branch" = maintenance/enforce-main-only-20260723 ]; then
+              continue
+            fi
+            encoded="$(jq -rn --arg value "$branch" '$value|@uri')"
+            gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/${encoded}"
+            echo "- gelöscht: \`${branch}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          remaining="$(
+            gh api --paginate \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GH_REPO}/branches?per_page=100" \
+              --jq '.[].name' \
+              | grep -v '^maintenance/enforce-main-only-20260723$' \
+              | sort
+          )"
+
+          test "$remaining" = main
+          echo '- verbleibend: `main`' >> "$GITHUB_STEP_SUMMARY"
+
+          gh api --method DELETE \
+            "repos/${GH_REPO}/git/refs/heads/maintenance/enforce-main-only-20260723"
