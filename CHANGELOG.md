@@ -2,12 +2,20 @@
 
 ## Unreleased
 
+- formales JSON-Schema für öffentliche 96-Slot-/15-Minuten-Fixtures ergänzt;
+- Privacy-Scanner mit Selbsttest, GitHub-Annotations und Prüfung auf private Netze, Tokens, Gerätekennungen und nicht neutrale Home-Assistant-Entity-IDs ergänzt;
+- lokaler Allowlist-Exporter für CSV-Tagesverläufe und Home-Assistant-State-Snapshots mit Rollenmapping ergänzt;
+- zweites, ausdrücklich synthetisches und nur auf anonymisierte Tagesenergiesummen kalibriertes 24h-Fixture ergänzt;
+- verpflichtende Home-Assistant-Smoke-Matrix auf 2026.7.3 und 2026.6.3 erweitert;
+- nicht blockierenden täglichen Kompatibilitätstest gegen den aktuellen `stable`-Container ergänzt;
+- standardisierte Failure-Bundles mit Workflow-Kontext, Dateiliste und SHA256-Prüfsummen ergänzt;
+- versionierte Empfehlung für Branch-Protection und Pflichtchecks ergänzt;
 - Codespaces-Dev-Container mit Python, Docker, ShellCheck, YAML- und GitHub-Actions-Unterstützung ergänzt;
 - unabhängiges Python-Referenzmodell für Safety, alle vier Modi, EVOpt-Handover und Writer-Policy ergänzt;
 - 29 feste synthetische Tag-/Nacht-/PV-/SoC-/Forecast-Szenarien sowie Hypothesis-, Grenzwert- und Fake-Time-Tests ergänzt;
 - kontrollierbarer Fake-evcc-Server und Home-Assistant-2026.7.3-Container-Smoke-Test ergänzt;
 - mehrstufiger GitHub-Actions-Workflow mit getrennten Artefakten und abschließendem Deep-Release-Gate ergänzt;
-- keine Verbindung zu realer Hardware und keine Änderung an den 18 produktiven Package-YAMLs.
+- keine Verbindung zu realer Hardware und keine Änderung an den 18 produktiven Package-YAMLs;
 - Installer-Backups werden mit einem eindeutigen `mktemp`-Suffix erzeugt; mehrere Installations- oder Rollbacktests innerhalb derselben Sekunde können sich nicht mehr gegenseitig überschreiben;
 - CI erzwingt denselben Zeitstempel für mehrere Installationsläufe und prüft die Kollisionssicherheit deterministisch;
 - GitHub Actions auf Node-24-fähige Versionen aktualisiert: `checkout@v6`, `setup-python@v6` und `upload-artifact@v6`;
@@ -58,11 +66,3 @@
 
 - eigenständiges Repository vom älteren Projekt `Solaredge_Netzdienlich` getrennt;
 - 18 portable Controller-Pakete;
-- vier Betriebsarten mit zentraler Safety- und Arbiter-Logik;
-- neutrale optionale externe Schnittstellen;
-- dynamische Mappings für Charge-Limit, Discharge-Limit, Command Mode und Storage Control;
-- EVOpt-Adapter mit vollständigem Fallback auf „Netzdienlich laden“;
-- Installer, Migration, Update, Rollback, Runtime-Manifest und Konfliktprüfung;
-- lokale Fahrzeug-, Wallbox-, Wärmepumpen-, Shelly-, Preis- und Akku-Saver-Abhängigkeiten entfernt;
-- Referenzmigration, Aktivierung und realer Writer-Rundlauf verifiziert;
-- MIT-Lizenz und vollständige Einsteiger-Dokumentation ergänzt.

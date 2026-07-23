@@ -24,22 +24,18 @@ jobs:
       - name: Install the reference Dev Container CLI
         run: npm install --global @devcontainers/cli@0.82.0
       - name: Build and start the Codespaces-compatible dev container
-        shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts/codespaces
-          devcontainer up --workspace-folder . --log-level info \
-            2>&1 | tee artifacts/codespaces/up.log
+          devcontainer up --workspace-folder . --log-level info 2>&1 | tee artifacts/codespaces/up.log
       - name: Run Codespaces setup and tests inside the dev container
-        shell: bash
         run: |
           set -Eeuo pipefail
-          devcontainer exec --workspace-folder . \
-            bash .devcontainer/post-create.sh \
-            2>&1 | tee artifacts/codespaces/post-create.log
-          devcontainer exec --workspace-folder . \
-            bash scripts/run_deep_tests.sh all \
-            2>&1 | tee artifacts/codespaces/test.log
+          devcontainer exec --workspace-folder . bash .devcontainer/post-create.sh 2>&1 | tee artifacts/codespaces/post-create.log
+          devcontainer exec --workspace-folder . bash scripts/run_deep_tests.sh all 2>&1 | tee artifacts/codespaces/test.log
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh codespaces artifacts/codespaces
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -63,6 +59,9 @@ jobs:
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Static, privacy and architecture contracts
         run: bash scripts/run_deep_tests.sh static
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh static artifacts
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -82,6 +81,9 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Fixed scenarios, property tests, fake-time and measured-day replay
         run: bash scripts/run_deep_tests.sh model
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh model artifacts
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -101,6 +103,9 @@ jobs:
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Exercise controllable evcc API fixtures
         run: bash scripts/run_deep_tests.sh fake-evcc
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh fake-evcc artifacts
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -110,22 +115,86 @@ jobs:
           retention-days: 30
 
   home-assistant-smoke:
-    name: home-assistant-2026.7.3-smoke
+    name: home-assistant-${{ matrix.ha_version }}-smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        ha_version:
+          - "2026.7.3"
+          - "2026.6.3"
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
       - name: Validate and start the installed package in Home Assistant
         env:
-          HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
+          HA_IMAGE: ghcr.io/home-assistant/home-assistant:${{ matrix.ha_version }}
           HA_START_TIMEOUT: "180"
+          SE_TEST_ARTIFACTS: artifacts/ha-smoke/${{ matrix.ha_version }}
         run: bash scripts/run_ha_smoke.sh
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh ha-${{ matrix.ha_version }} artifacts/ha-smoke/${{ matrix.ha_version }}
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: home-assistant-smoke-${{ github.sha }}
-          path: artifacts/ha-smoke
+          name: home-assistant-smoke-${{ matrix.ha_version }}-${{ github.sha }}
+          path: artifacts/ha-smoke/${{ matrix.ha_version }}
           if-no-files-found: warn
+          retention-days: 30
+
+  stable-preview:
+    name: stable-preview-nonblocking
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Exercise current Home Assistant stable image without blocking the release gate
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/stable-preview
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/stable-preview/smoke \
+            bash scripts/run_ha_smoke.sh
+          smoke_rc=$?
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/stable-preview/replay \
+          HA_24H_REPLAY_TIMEOUT=600 \
+            bash scripts/run_ha_24h_replay.sh
+          replay_rc=$?
+          python3 - "$smoke_rc" "$replay_rc" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          smoke = int(sys.argv[1])
+          replay = int(sys.argv[2])
+          Path("artifacts/stable-preview/status.json").write_text(
+              json.dumps(
+                  {
+                      "blocking": False,
+                      "image": "ghcr.io/home-assistant/home-assistant:stable",
+                      "pass": smoke == 0 and replay == 0,
+                      "smoke_exit": smoke,
+                      "replay_exit": replay,
+                  },
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          if [ "$smoke_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ]; then
+            echo "::warning title=Stable preview::Current stable image needs review; this preview is intentionally non-blocking."
+            bash scripts/collect_failure_bundle.sh stable-preview artifacts/stable-preview || true
+          fi
+          exit 0
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: stable-preview-${{ github.sha }}
+          path: artifacts/stable-preview
+          if-no-files-found: error
           retention-days: 30
 
   real-day-24h:
@@ -140,18 +209,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           git fetch origin main --depth=1
-          git diff --exit-code origin/main...HEAD -- \
-            package \
-            custom_components/se_write_watchdog \
-            scripts/install_package.sh \
-            scripts/runtime \
-            audit/runtime
+          git diff --exit-code origin/main...HEAD -- package custom_components/se_write_watchdog scripts/install_package.sh scripts/runtime audit/runtime
       - name: Replay one measured day through all four modes in Home Assistant
         env:
           HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.7.3
           HA_START_TIMEOUT: "180"
           HA_24H_REPLAY_TIMEOUT: "480"
         run: bash scripts/run_ha_24h_replay.sh
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh real-day-24h artifacts/ha-24h
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -180,8 +247,10 @@ jobs:
           unzip -t "$ZIP"
           mkdir artifacts/extracted
           unzip -q "$ZIP" -d artifacts/extracted
-          python artifacts/extracted/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py \
-            artifacts/extracted/SolarEdge_HA_Energy_Controller
+          python artifacts/extracted/SolarEdge_HA_Energy_Controller/audit/manifest_audit.py artifacts/extracted/SolarEdge_HA_Energy_Controller
+      - name: Collect failure bundle
+        if: failure()
+        run: bash scripts/collect_failure_bundle.sh release artifacts/release artifacts/extracted
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -214,8 +283,7 @@ jobs:
           RELEASE: ${{ needs.release-installation.result }}
         run: |
           set -Eeuo pipefail
-          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nreal_day=%s\nrelease=%s\n' \
-            "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$REAL_DAY" "$RELEASE"
+          printf 'codespaces=%s\nstatic=%s\nmodel=%s\nevcc=%s\nha=%s\nreal_day=%s\nrelease=%s\n' "$CODESPACES" "$STATIC" "$MODEL" "$EVCC" "$HA" "$REAL_DAY" "$RELEASE"
           test "$CODESPACES" = success
           test "$STATIC" = success
           test "$MODEL" = success

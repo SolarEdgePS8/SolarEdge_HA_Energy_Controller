@@ -47,7 +47,9 @@ Ein Release Candidate ist bewusst noch kein stabiler `v1.0`-Stand. Andere SolarE
 - Installer, Update, Migration und vollständiger dateibezogener Rollback;
 - optionale Wetter-, SQL-, evcc-, EVOpt- und Strompreis-/Kosten-Anbindung;
 - neutrale Beispiel-Packages für Filter, Energiezähler, Forecast-, evcc- und Preisadapter;
-- Installationswege für Home Assistant OS, Supervised, Container und Core.
+- Installationswege für Home Assistant OS, Supervised, Container und Core;
+- reproduzierbarer Deep Testbench mit Codespaces, zwei gepinnten HA-Versionen und einem 24h-Vier-Modi-Replay;
+- formales Fixture-Schema, Privacy-Scanner und lokaler Allowlist-Exporter für zusätzliche Testtage.
 
 ## Was nicht enthalten ist
 
@@ -209,25 +211,31 @@ Der Watchdog protokolliert jeden beobachteten `number.set_value`-Aufruf auf das 
 - [Externe Signale](docs/integrations/07_EXTERNAL_SIGNALS.md)
 - [Dynamische Strompreise und Kosten](docs/integrations/08_ELECTRICITY_PRICE.md)
 
-### Technische Referenz
+### Technische Referenz und Tests
 
 - [Funktion der YAML-Dateien](docs/reference/01_YAML_FILES.md)
 - [Safety, Arbiter und Writer](docs/reference/02_SAFETY_ARBITER_WRITERS.md)
 - [Tests und Release-Gates](docs/reference/03_TESTS_AND_RELEASE_GATES.md)
 - [Deep Testbench, Codespaces und HA-Container-Simulation](docs/13_DEEP_TESTBENCH.md)
+- [24h-Replay mit vier vollständigen Modusläufen](docs/14_REAL_DAY_24H_REPLAY.md)
+- [Fixture-Schema, Privacy-Exporter, HA-Matrix und Nightly](docs/15_TESTBENCH_HARDENING.md)
 - [Technischer Status RC4](docs/reference/04_FINAL_TECHNICAL_STATUS.md)
-
 
 ## Tiefgreifende Testumgebung
 
-Das Repository enthält zusätzlich einen hardwarefreien Deep Testbench mit festen Tag-/Nacht-/PV-/SoC-Szenarien, Property-Tests, Fake-Time-Zustandsmaschinen, einem kontrollierbaren Fake-evcc-Server und einem gepinnten Home-Assistant-Container-Smoke-Test. Codespaces und GitHub Actions verwenden dieselben Einstiegsskripte.
+Das Repository enthält einen hardwarefreien Deep Testbench mit festen Tag-/Nacht-/PV-/SoC-Szenarien, Property-Tests, Fake-Time-Zustandsmaschinen, einem kontrollierbaren Fake-evcc-Server und Home-Assistant-Container-Tests. Die Pflichtmatrix prüft Home Assistant 2026.7.3 und 2026.6.3; der vollständige 24h-Replay spielt denselben Tagesverlauf durch alle vier Betriebsarten. Codespaces und GitHub Actions verwenden dieselben Einstiegsskripte.
 
 ```bash
 bash scripts/run_deep_tests.sh all
 bash scripts/run_ha_smoke.sh
+bash scripts/run_ha_24h_replay.sh
 ```
 
-Details: [Deep Testbench und GitHub Codespaces](docs/13_DEEP_TESTBENCH.md).
+Eigene Testtage werden ausschließlich lokal und über ein Rollen-Allowlisting erzeugt. Details:
+
+- [Deep Testbench und GitHub Codespaces](docs/13_DEEP_TESTBENCH.md)
+- [Reproduzierbarer 24-Stunden-Test](docs/14_REAL_DAY_24H_REPLAY.md)
+- [Testbench-Hardening und lokale Datenerzeugung](docs/15_TESTBENCH_HARDENING.md)
 
 ## Sicherheit
 
@@ -238,6 +246,7 @@ Details: [Deep Testbench und GitHub Codespaces](docs/13_DEEP_TESTBENCH.md).
 - Kurze EVOpt-Ausfälle öffnen den Speicher im EVOpt-Modus nicht automatisch.
 - Weitere Automationen dürfen nicht auf dieselben gemappten SolarEdge-Ziele schreiben.
 - Der Watchdog ist read-only; er beobachtet Schreibaufrufe, erzeugt aber selbst keine SolarEdge-Befehle.
+- Test-Fixtures und HA-Container verwenden ausschließlich synthetische Writer-Ziele; ein Merge der Testbench verändert keine laufende Home-Assistant-Instanz.
 
 ## Lizenz
 

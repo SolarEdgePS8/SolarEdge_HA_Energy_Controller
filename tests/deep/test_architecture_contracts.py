@@ -100,11 +100,18 @@ def test_no_private_ipv4_addresses_or_credentials_in_public_runtime_files() -> N
         "eyjhb",  # common JWT prefix; fixture/runtime must never contain live tokens
     )
     roots = [PACKAGE, ROOT / "scripts", ROOT / "custom_components", ROOT / "testbench"]
+    intentional_detector_sources = {
+        ROOT / "scripts/privacy_scan.py",
+    }
     violations: list[str] = []
     for base in roots:
         if not base.exists():
             continue
         for path in base.rglob("*"):
+            if path in intentional_detector_sources:
+                # The dedicated scanner must contain the patterns it detects and
+                # verifies them through its own self-test.
+                continue
             if path.is_file() and path.suffix in {".py", ".sh", ".yaml", ".yml", ".json"}:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 lowered = text.lower()

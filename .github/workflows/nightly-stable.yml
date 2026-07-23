@@ -1,0 +1,68 @@
+name: Nightly Home Assistant Stable Compatibility
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-ha-stable
+  cancel-in-progress: true
+
+jobs:
+  stable-compatibility:
+    name: stable-smoke-and-24h-replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run non-blocking stable compatibility suite
+        id: stable
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/nightly-stable
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/nightly-stable/smoke \
+            bash scripts/run_ha_smoke.sh
+          smoke_rc=$?
+          HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable \
+          SE_TEST_ARTIFACTS=artifacts/nightly-stable/replay \
+          HA_24H_REPLAY_TIMEOUT=600 \
+            bash scripts/run_ha_24h_replay.sh
+          replay_rc=$?
+          python3 - "$smoke_rc" "$replay_rc" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          smoke = int(sys.argv[1])
+          replay = int(sys.argv[2])
+          Path("artifacts/nightly-stable/status.json").write_text(
+              json.dumps(
+                  {
+                      "blocking": False,
+                      "image": "ghcr.io/home-assistant/home-assistant:stable",
+                      "pass": smoke == 0 and replay == 0,
+                      "smoke_exit": smoke,
+                      "replay_exit": replay,
+                  },
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          if [ "$smoke_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ]; then
+            echo "::warning title=Nightly stable compatibility::Stable image needs review. This scheduled job is intentionally non-blocking."
+            bash scripts/collect_failure_bundle.sh nightly-stable artifacts/nightly-stable || true
+          fi
+          exit 0
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: nightly-stable-${{ github.run_id }}
+          path: artifacts/nightly-stable
+          if-no-files-found: error
+          retention-days: 30
