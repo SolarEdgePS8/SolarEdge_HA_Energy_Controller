@@ -297,6 +297,28 @@ def patch(path: Path) -> None:
         "async-result-persistence",
     )
 
+    text = replace_once(
+        text,
+        '''async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    settings = config.get(DOMAIN, {}) or {}
+    fixture = json.loads(Path(str(settings.get("fixture", "/config/testbench/real_day_2026-07-21_15m.json"))).read_text(encoding="utf-8"))
+    if "records" not in fixture:
+''',
+        '''async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    settings = config.get(DOMAIN, {}) or {}
+    fixture_path = Path(
+        str(settings.get("fixture", "/config/testbench/real_day_2026-07-21_15m.json"))
+    )
+    fixture_text = await asyncio.to_thread(
+        fixture_path.read_text,
+        encoding="utf-8",
+    )
+    fixture = json.loads(fixture_text)
+    if "records" not in fixture:
+''',
+        "async-fixture-load",
+    )
+
     path.write_text(text, encoding="utf-8")
 
 

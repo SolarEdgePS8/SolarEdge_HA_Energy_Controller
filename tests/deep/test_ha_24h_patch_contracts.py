@@ -7,6 +7,7 @@ from testbench.patch_ha_24h_component import patch
 
 ROOT = Path(__file__).parents[2]
 SOURCE = ROOT / "testbench" / "custom_components" / "se_test_replay" / "__init__.py"
+RUNNER = ROOT / "scripts" / "run_ha_24h_replay.sh"
 
 
 def patched_component(tmp_path: Path) -> str:
@@ -35,6 +36,23 @@ def test_replay_result_files_are_written_off_the_event_loop(tmp_path: Path) -> N
     text = patched_component(tmp_path)
     assert "def write_results() -> None:" in text
     assert "await asyncio.to_thread(write_results)" in text
+
+
+def test_fixture_is_loaded_off_the_home_assistant_event_loop(tmp_path: Path) -> None:
+    text = patched_component(tmp_path)
+    setup = text.split(
+        "async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:\n",
+        1,
+    )[1]
+    assert "fixture_text = await asyncio.to_thread(" in setup
+    assert "fixture_path.read_text" in setup
+    assert "fixture = json.loads(fixture_text)" in setup
+    assert ")).read_text(encoding=\"utf-8\"))" not in setup
+
+
+def test_runtime_runner_rejects_blocking_calls_from_replay_integration() -> None:
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "Detected blocking call.*se_test_replay" in text
 
 
 def test_patch_keeps_real_writer_and_session_manager_execution(tmp_path: Path) -> None:
